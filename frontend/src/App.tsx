@@ -6,6 +6,7 @@ import { ThemeProvider, CssBaseline } from '@mui/material';
 import { theme } from '@/styles/theme';
 import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
+import QuestionGenerator from '@/pages/QuestionGenerator';
 import { User, UserRole } from '@/types/auth';
 
 /**
@@ -39,8 +40,7 @@ export const App: React.FC = () => {
    * 处理导航到题目生成页面
    */
   const handleNavigateToGenerate = () => {
-    // TODO: 使用 react-router 导航
-    console.log('导航到题目生成页面');
+    window.location.href = '/questions/generate';
   };
 
   /**
@@ -91,12 +91,12 @@ export const App: React.FC = () => {
               } 
             />
             
-            {/* 题目生成页面 - 待实现 */}
+            {/* 题目生成页面 */}
             <Route 
               path="/questions/generate" 
               element={
                 user ? (
-                  <div>题目生成页面 - 待实现</div>
+                  <QuestionGenerator />
                 ) : (
                   <Navigate to="/login" replace />
                 )

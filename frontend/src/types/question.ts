@@ -2,13 +2,12 @@
 
 /**
  * 题目类型枚举
- * 支持五种不同的题目类型
+ * 支持四种不同的题目类型
  */
 export enum QuestionType {
   SINGLE_CHOICE = 'single_choice',    // 单选题
   MULTIPLE_CHOICE = 'multiple_choice', // 多选题
   TRUE_FALSE = 'true_false',          // 判断题
-  FILL_BLANK = 'fill_blank',          // 填空题
   SHORT_ANSWER = 'short_answer'       // 简答题
 }
 
