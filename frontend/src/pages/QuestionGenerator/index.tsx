@@ -9,7 +9,6 @@ import {
   Stepper,
   Step,
   StepLabel,
-  StepContent,
   Button,
   Alert,
   CircularProgress,
@@ -45,39 +44,64 @@ import { Question } from '@/types/question';
 
 /**
  * 生成步骤配置
+ * 根据不同的生成模式显示不同的步骤
  */
-const GENERATION_STEPS = [
-  {
-    id: 'configure',
-    label: '配置生成参数',
-    description: '选择生成方式和配置参数',
-    icon: <Settings />
-  },
-  {
+const getGenerationSteps = (mode: GenerationMode) => {
+  const baseSteps = [
+    {
+      id: 'configure',
+      label: '配置生成参数',
+      description: '选择生成方式和配置参数',
+      icon: <Settings />
+    }
+  ];
+
+  const generateStep = {
     id: 'generate',
-    label: 'AI生成题目',
-    description: '使用AI生成题目内容',
+    label: mode === GenerationMode.IMAGE_IMPORT ? 'AI识别题目' : 'AI生成题目',
+    description: mode === GenerationMode.IMAGE_IMPORT ? '使用OCR识别图片中的题目' : '使用AI生成题目内容',
     icon: <AutoAwesome />
-  },
-  {
+  };
+
+  const editStep = {
     id: 'edit',
     label: '编辑和完善',
     description: '编辑题目内容和答案',
     icon: <Edit />
-  },
-  {
+  };
+
+  const previewStep = {
     id: 'preview',
     label: '预览测试',
     description: '预览题目和在线测试',
     icon: <Visibility />
-  },
-  {
+  };
+
+  const saveStep = {
     id: 'save',
     label: '保存题目',
     description: '保存到题库中',
     icon: <Save />
+  };
+
+  // 手动创建模式跳过生成步骤
+  if (mode === GenerationMode.MANUAL_CREATE) {
+    return [
+      baseSteps[0],
+      editStep,
+      previewStep,
+      saveStep
+    ];
   }
-];
+
+  return [
+    ...baseSteps,
+    generateStep,
+    editStep,
+    previewStep,
+    saveStep
+  ];
+};
 
 /**
  * 题目生成器主页面组件
@@ -104,10 +128,13 @@ export const QuestionGenerator: React.FC = () => {
   // 当前步骤索引
   const [activeStep, setActiveStep] = useState(0);
 
+  // 获取当前模式的步骤配置
+  const currentSteps = getGenerationSteps(generatorState.config.mode);
+
   /**
    * 获取当前步骤信息
    */
-  const getCurrentStep = () => GENERATION_STEPS[activeStep];
+  const getCurrentStep = () => currentSteps[activeStep];
 
   /**
    * 更新生成器状态
@@ -126,6 +153,8 @@ export const QuestionGenerator: React.FC = () => {
         mode
       }
     });
+    // 重置到第一步
+    setActiveStep(0);
   }, [generatorState.config, updateGeneratorState]);
 
   /**
@@ -144,19 +173,33 @@ export const QuestionGenerator: React.FC = () => {
       error: null
     });
     
-    setActiveStep(1); // 移动到生成步骤
+    // 手动创建模式直接跳到编辑步骤
+    if (generatorState.config.mode === GenerationMode.MANUAL_CREATE) {
+      updateGeneratorState({
+        status: GenerationStatus.EDITING,
+        result: {
+          questions: [],
+          totalCount: 0,
+          generationTime: 0
+        }
+      });
+      setActiveStep(1); // 跳到编辑步骤（因为没有生成步骤）
+      return;
+    }
+    
+    setActiveStep(1); // 移动到生成/识别步骤
     
     try {
-      // TODO: 实现实际的 AI 生成逻辑
-      console.log('开始生成题目，配置：', generatorState.config);
+      // TODO: 实现实际的 AI 生成或OCR识别逻辑
+      console.log('开始处理，配置：', generatorState.config);
       
-      // 模拟生成过程
-      // 在实际实现中，这里会调用 API
+      // 模拟处理过程
+      // 在实际实现中，这里会调用相应的 API
       
     } catch (error) {
       updateGeneratorState({
         status: GenerationStatus.IDLE,
-        error: error instanceof Error ? error.message : '生成失败'
+        error: error instanceof Error ? error.message : '处理失败'
       });
     }
   }, [generatorState.config, updateGeneratorState]);
@@ -187,8 +230,8 @@ export const QuestionGenerator: React.FC = () => {
       isPreviewMode: true,
       status: GenerationStatus.PREVIEWING
     });
-    setActiveStep(3); // 移动到预览步骤
-  }, [updateGeneratorState]);
+    setActiveStep(currentSteps.length - 2); // 移动到预览步骤
+  }, [updateGeneratorState, currentSteps.length]);
 
   /**
    * 退出预览模式
@@ -199,8 +242,8 @@ export const QuestionGenerator: React.FC = () => {
       status: GenerationStatus.EDITING,
       userAnswers: [] // 清空答题记录
     });
-    setActiveStep(2); // 回到编辑步骤
-  }, [updateGeneratorState]);
+    setActiveStep(currentSteps.length - 3); // 回到编辑步骤
+  }, [updateGeneratorState, currentSteps.length]);
 
   /**
    * 保存题目
@@ -220,7 +263,7 @@ export const QuestionGenerator: React.FC = () => {
         lastSavedAt: new Date()
       });
       
-      setActiveStep(4); // 移动到保存步骤
+      setActiveStep(currentSteps.length - 1); // 移动到保存步骤
       
     } catch (error) {
       updateGeneratorState({
@@ -228,7 +271,7 @@ export const QuestionGenerator: React.FC = () => {
         error: error instanceof Error ? error.message : '保存失败'
       });
     }
-  }, [generatorState.result, updateGeneratorState]);
+  }, [generatorState.result, updateGeneratorState, currentSteps.length]);
 
   /**
    * 重置到初始状态
@@ -256,8 +299,10 @@ export const QuestionGenerator: React.FC = () => {
    * 渲染当前步骤的内容
    */
   const renderStepContent = () => {
-    switch (activeStep) {
-      case 0: // 配置步骤
+    const currentStep = getCurrentStep();
+    
+    switch (currentStep.id) {
+      case 'configure': // 配置步骤
         return (
           <Box>
             <GenerationModeSelector
@@ -274,19 +319,22 @@ export const QuestionGenerator: React.FC = () => {
           </Box>
         );
 
-      case 1: // 生成步骤
+      case 'generate': // 生成/识别步骤
         return (
           <GenerationProgress
             progress={generatorState.progress}
             status={generatorState.status}
+            mode={generatorState.config.mode}
             onComplete={() => {
-              setActiveStep(2);
+              // 根据模式调整步骤索引
+              const nextStepIndex = generatorState.config.mode === GenerationMode.MANUAL_CREATE ? 1 : 2;
+              setActiveStep(nextStepIndex);
               updateGeneratorState({ status: GenerationStatus.EDITING });
             }}
           />
         );
 
-      case 2: // 编辑步骤
+      case 'edit': // 编辑步骤
         return (
           <QuestionEditor
             questions={generatorState.result?.questions || []}
@@ -294,10 +342,11 @@ export const QuestionGenerator: React.FC = () => {
             onPreview={handleEnterPreview}
             selectedQuestionId={generatorState.selectedQuestionId}
             onQuestionSelect={(id) => updateGeneratorState({ selectedQuestionId: id })}
+            mode={generatorState.config.mode}
           />
         );
 
-      case 3: // 预览步骤
+      case 'preview': // 预览步骤
         return (
           <PreviewMode
             questions={generatorState.result?.questions || []}
@@ -310,7 +359,7 @@ export const QuestionGenerator: React.FC = () => {
           />
         );
 
-      case 4: // 保存步骤
+      case 'save': // 保存步骤
         return (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="h5" color="success.main" gutterBottom>
@@ -364,7 +413,7 @@ export const QuestionGenerator: React.FC = () => {
         {/* 步骤指示器 */}
         <Box sx={{ p: 3, backgroundColor: 'background.default' }}>
           <Stepper activeStep={activeStep} orientation="horizontal">
-            {GENERATION_STEPS.map((step, index) => (
+            {currentSteps.map((step, index) => (
               <Step key={step.id}>
                 <StepLabel
                   icon={step.icon}

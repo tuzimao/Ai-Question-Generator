@@ -18,7 +18,6 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Slider,
   FormControl,
   InputLabel,
   Select,
@@ -28,9 +27,7 @@ import {
 import {
   ExpandMore,
   Info,
-  CloudUpload,
   Delete,
-  Add,
   Tune,
   Psychology,
   School,
@@ -38,6 +35,7 @@ import {
 } from '@mui/icons-material';
 
 import { FileUploadZone } from './FileUploadZone';
+import { ImageUploadZone } from './ImageUploadZone';
 import { QuestionTypeConfig } from './QuestionTypeConfig';
 import {
   GenerationMode,
@@ -70,7 +68,7 @@ const GRADES = [
   '高中一年级', '高中二年级', '高中三年级'
 ];
 
-const TEXTBOOKS = {
+const TEXTBOOKS: Record<string, string[]> = {
   '数学': ['人教版', '北师大版', '苏教版', '沪教版'],
   '语文': ['人教版', '苏教版', '北师大版', '语文版'],
   '英语': ['人教版', '外研版', '牛津版', '冀教版'],
@@ -117,8 +115,25 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
   };
 
   /**
+   * 处理图片上传
+   */
+  const handleImageUpload = (images: UploadedFile[]) => {
+    updateConfig({
+      uploadedImages: [...config.uploadedImages, ...images]
+    });
+  };
+
+  /**
+   * 删除已上传的图片
+   */
+  const handleImageRemove = (imageId: string) => {
+    updateConfig({
+      uploadedImages: config.uploadedImages.filter(f => f.id !== imageId)
+    });
+  };
+
+  /**
    * 更新题目类型配置
-   * 使用类型安全的方式更新配置
    */
   const handleQuestionTypeUpdate = (type: QuestionType, updates: Partial<GenerationConfig['questionTypes'][QuestionType]>) => {
     updateConfig({
@@ -144,20 +159,25 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
       return { isValid: false, message: '请上传至少一个文件' };
     }
 
-    const enabledTypes = Object.values(config.questionTypes).filter(type => type.enabled);
-    if (enabledTypes.length === 0) {
-      return { isValid: false, message: '请至少启用一种题目类型' };
+    if (config.mode === GenerationMode.IMAGE_IMPORT && config.uploadedImages.length === 0) {
+      return { isValid: false, message: '请上传至少一张题目图片' };
     }
 
-    const totalQuestions = enabledTypes.reduce((sum, type) => sum + type.count, 0);
-    if (totalQuestions === 0) {
-      return { isValid: false, message: '题目总数不能为0' };
+    // 手动创建模式不需要验证题目类型配置
+    if (config.mode !== GenerationMode.MANUAL_CREATE) {
+      const enabledTypes = Object.values(config.questionTypes).filter(type => type.enabled);
+      if (enabledTypes.length === 0) {
+        return { isValid: false, message: '请至少启用一种题目类型' };
+      }
+
+      const totalQuestions = enabledTypes.reduce((sum, type) => sum + type.count, 0);
+      if (totalQuestions === 0) {
+        return { isValid: false, message: '题目总数不能为0' };
+      }
     }
 
     return { isValid: true };
   };
-
-  const validation = validateConfig();
 
   /**
    * 获取可用的教材列表
@@ -166,81 +186,113 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
     return TEXTBOOKS[config.subject as keyof typeof TEXTBOOKS] || ['通用版'];
   };
 
+  /**
+   * 是否显示基础信息配置
+   */
+  const shouldShowBasicInfo = () => {
+    return config.mode !== GenerationMode.MANUAL_CREATE;
+  };
+
+  /**
+   * 是否显示题目配置
+   */
+  const shouldShowQuestionConfig = () => {
+    return config.mode !== GenerationMode.MANUAL_CREATE;
+  };
+
+  const validation = validateConfig();
+
   return (
     <Box>
-      {/* 基础配置区域 */}
-      <Card elevation={1} sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <School color="primary" sx={{ mr: 1 }} />
-            <Typography variant="h6" fontWeight="bold">
-              基础信息
-            </Typography>
-          </Box>
+      {/* 基础配置区域 - 可选显示 */}
+      {shouldShowBasicInfo() && (
+        <Card elevation={1} sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <School color="primary" sx={{ mr: 1 }} />
+              <Typography variant="h6" fontWeight="bold">
+                基础信息 (可选)
+              </Typography>
+              <Tooltip title="这些信息有助于AI更好地生成相关题目，但不是必需的">
+                <IconButton size="small" sx={{ ml: 1 }}>
+                  <Info fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
 
-          <Grid container spacing={3}>
-            {/* 学科选择 */}
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>学科</InputLabel>
-                <Select
-                  value={config.subject}
-                  label="学科"
-                  onChange={(e) => updateConfig({ 
-                    subject: e.target.value,
-                    textbook: getAvailableTextbooks()[0] // 重置教材
-                  })}
-                  disabled={disabled}
-                >
-                  {SUBJECTS.map(subject => (
-                    <MenuItem key={subject} value={subject}>
-                      {subject}
+            <Grid container spacing={3}>
+              {/* 学科选择 */}
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth>
+                  <InputLabel>学科 (可选)</InputLabel>
+                  <Select
+                    value={config.subject || ''}
+                    label="学科 (可选)"
+                    onChange={(e) => updateConfig({ 
+                      subject: e.target.value || undefined,
+                      textbook: e.target.value ? getAvailableTextbooks()[0] : undefined
+                    })}
+                    disabled={disabled}
+                  >
+                    <MenuItem value="">
+                      <em>不指定</em>
                     </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+                    {SUBJECTS.map(subject => (
+                      <MenuItem key={subject} value={subject}>
+                        {subject}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
-            {/* 年级选择 */}
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>年级</InputLabel>
-                <Select
-                  value={config.grade}
-                  label="年级"
-                  onChange={(e) => updateConfig({ grade: e.target.value })}
-                  disabled={disabled}
-                >
-                  {GRADES.map(grade => (
-                    <MenuItem key={grade} value={grade}>
-                      {grade}
+              {/* 年级选择 */}
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth>
+                  <InputLabel>年级 (可选)</InputLabel>
+                  <Select
+                    value={config.grade || ''}
+                    label="年级 (可选)"
+                    onChange={(e) => updateConfig({ grade: e.target.value || undefined })}
+                    disabled={disabled}
+                  >
+                    <MenuItem value="">
+                      <em>不指定</em>
                     </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+                    {GRADES.map(grade => (
+                      <MenuItem key={grade} value={grade}>
+                        {grade}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
-            {/* 教材选择 */}
-            <Grid item xs={12} sm={4}>
-              <FormControl fullWidth>
-                <InputLabel>教材版本</InputLabel>
-                <Select
-                  value={config.textbook || ''}
-                  label="教材版本"
-                  onChange={(e) => updateConfig({ textbook: e.target.value })}
-                  disabled={disabled}
-                >
-                  {getAvailableTextbooks().map(textbook => (
-                    <MenuItem key={textbook} value={textbook}>
-                      {textbook}
+              {/* 教材选择 */}
+              <Grid item xs={12} sm={4}>
+                <FormControl fullWidth disabled={!config.subject}>
+                  <InputLabel>教材版本 (可选)</InputLabel>
+                  <Select
+                    value={config.textbook || ''}
+                    label="教材版本 (可选)"
+                    onChange={(e) => updateConfig({ textbook: e.target.value || undefined })}
+                    disabled={disabled || !config.subject}
+                  >
+                    <MenuItem value="">
+                      <em>不指定</em>
                     </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                    {getAvailableTextbooks().map(textbook => (
+                      <MenuItem key={textbook} value={textbook}>
+                        {textbook}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
             </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 内容输入区域 */}
       <Card elevation={1} sx={{ mb: 3 }}>
@@ -319,32 +371,149 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
             </Box>
           )}
 
+          {/* 图片导入模式 */}
+          {config.mode === GenerationMode.IMAGE_IMPORT && (
+            <Box>
+              <ImageUploadZone
+                onImageUpload={handleImageUpload}
+                disabled={disabled}
+                acceptedTypes={['.jpg', '.jpeg', '.png', '.pdf']}
+                maxFileSize={20 * 1024 * 1024} // 20MB
+              />
+              
+              {/* 已上传图片列表 */}
+              {config.uploadedImages.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    已上传图片 ({config.uploadedImages.length})
+                  </Typography>
+                  {config.uploadedImages.map(image => (
+                    <Chip
+                      key={image.id}
+                      label={`${image.name} (${(image.size / 1024 / 1024).toFixed(1)}MB)`}
+                      onDelete={() => handleImageRemove(image.id)}
+                      deleteIcon={<Delete />}
+                      variant="outlined"
+                      sx={{ mr: 1, mb: 1 }}
+                      color={image.status === 'completed' ? 'success' : 'default'}
+                    />
+                  ))}
+                </Box>
+              )}
+
+              {/* OCR设置 */}
+              <Accordion sx={{ mt: 2 }}>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="subtitle2">识别设置</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <FormControl fullWidth size="small">
+                        <InputLabel>识别语言</InputLabel>
+                        <Select
+                          value={config.ocrSettings?.language || 'auto'}
+                          onChange={(e) => updateConfig({
+                            ocrSettings: {
+                              ...config.ocrSettings,
+                              language: e.target.value as 'zh' | 'en' | 'auto'
+                            }
+                          })}
+                          disabled={disabled}
+                        >
+                          <MenuItem value="auto">自动检测</MenuItem>
+                          <MenuItem value="zh">中文</MenuItem>
+                          <MenuItem value="en">英文</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={config.ocrSettings?.enhanceImage || true}
+                            onChange={(e) => updateConfig({
+                              ocrSettings: {
+                                ...config.ocrSettings,
+                                enhanceImage: e.target.checked
+                              }
+                            })}
+                            disabled={disabled}
+                          />
+                        }
+                        label="增强图片质量"
+                      />
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={config.ocrSettings?.detectFormulas || true}
+                            onChange={(e) => updateConfig({
+                              ocrSettings: {
+                                ...config.ocrSettings,
+                                detectFormulas: e.target.checked
+                              }
+                            })}
+                            disabled={disabled}
+                          />
+                        }
+                        label="识别数学公式"
+                      />
+                    </Grid>
+                  </Grid>
+                </AccordionDetails>
+              </Accordion>
+
+              {/* 补充描述 */}
+              <TextField
+                fullWidth
+                multiline
+                rows={2}
+                label="补充要求（可选）"
+                placeholder="可以补充对识别结果的处理要求，比如重点关注某些题型..."
+                value={config.description}
+                onChange={(e) => updateConfig({ description: e.target.value })}
+                disabled={disabled}
+                sx={{ mt: 2 }}
+              />
+            </Box>
+          )}
+
           {/* 手动创建模式 */}
           {config.mode === GenerationMode.MANUAL_CREATE && (
-            <Alert severity="info">
-              手动创建模式下，您可以直接在编辑器中创建题目，或者先配置基本参数让AI提供参考模板。
+            <Alert severity="info" sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box>
+                <Typography variant="body1" fontWeight="bold" gutterBottom>
+                  手动创建模式
+                </Typography>
+                <Typography variant="body2">
+                  在此模式下，您将直接进入编辑器创建题目。可以在编辑器中选择题目类型，
+                  并使用AI助手来优化题目内容和生成解析。
+                </Typography>
+              </Box>
             </Alert>
           )}
         </CardContent>
       </Card>
 
-      {/* 题目类型配置 */}
-      <Card elevation={1} sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <Tune color="primary" sx={{ mr: 1 }} />
-            <Typography variant="h6" fontWeight="bold">
-              题目配置
-            </Typography>
-          </Box>
+      {/* 题目类型配置 - 仅非手动创建模式显示 */}
+      {shouldShowQuestionConfig() && (
+        <Card elevation={1} sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <Tune color="primary" sx={{ mr: 1 }} />
+              <Typography variant="h6" fontWeight="bold">
+                题目配置
+              </Typography>
+            </Box>
 
-          <QuestionTypeConfig
-            config={config.questionTypes}
-            onUpdate={handleQuestionTypeUpdate}
-            disabled={disabled}
-          />
-        </CardContent>
-      </Card>
+            <QuestionTypeConfig
+              config={config.questionTypes}
+              onUpdate={handleQuestionTypeUpdate}
+              disabled={disabled}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* 高级选项 */}
       <Accordion 
@@ -416,7 +585,10 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
           startIcon={<Psychology />}
           sx={{ py: 1.5 }}
         >
-          {disabled ? '生成中...' : '开始AI生成题目'}
+          {disabled ? '处理中...' : 
+           config.mode === GenerationMode.IMAGE_IMPORT ? '开始识别导入题目' :
+           config.mode === GenerationMode.MANUAL_CREATE ? '进入编辑器创建' :
+           '开始AI生成题目'}
         </Button>
       </Box>
     </Box>

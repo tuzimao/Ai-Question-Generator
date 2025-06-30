@@ -7,6 +7,7 @@ import { theme } from '@/styles/theme';
 import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import QuestionGenerator from '@/pages/QuestionGenerator';
+import Settings from '@/pages/Settings';
 import { User, UserRole } from '@/types/auth';
 
 /**
@@ -139,12 +140,12 @@ export const App: React.FC = () => {
               } 
             />
             
-            {/* 设置页面 - 待实现 */}
+            {/* 设置页面 */}
             <Route 
               path="/settings" 
               element={
                 user ? (
-                  <div>设置页面 - 待实现</div>
+                  <Settings />
                 ) : (
                   <Navigate to="/login" replace />
                 )

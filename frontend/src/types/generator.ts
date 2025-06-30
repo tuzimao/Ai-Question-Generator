@@ -8,6 +8,7 @@ import { QuestionType, Difficulty, Question } from './question';
 export enum GenerationMode {
   TEXT_DESCRIPTION = 'text_description',  // 文字描述生成
   FILE_UPLOAD = 'file_upload',            // 文件上传生成
+  IMAGE_IMPORT = 'image_import',           // 图片导入题目 (新增)
   MANUAL_CREATE = 'manual_create'         // 手动创建
 }
 
@@ -47,16 +48,17 @@ export interface UploadedFile {
 export interface GenerationConfig {
   mode: GenerationMode;                   // 生成方式
   
-  // 基础配置
-  subject: string;                        // 科目
-  grade: string;                          // 年级
-  textbook?: string;                      // 教材（可选）
+  // 基础配置 (改为可选)
+  subject?: string;                       // 科目 (可选)
+  grade?: string;                         // 年级 (可选)
+  textbook?: string;                      // 教材 (可选)
   
   // 生成要求
   description: string;                    // 文字描述或要求
   uploadedFiles: UploadedFile[];          // 上传的文件列表
+  uploadedImages: UploadedFile[];         // 上传的图片列表 (新增)
   
-  // 题目配置
+  // 题目配置 (手动创建模式下可选)
   questionTypes: {                        // 各类题目配置
     [QuestionType.SINGLE_CHOICE]: {
       count: number;                      // 数量
@@ -84,6 +86,14 @@ export interface GenerationConfig {
   includeExplanation: boolean;            // 是否包含解析
   autoGenerateKnowledgePoints: boolean;   // 是否自动生成知识点
   customPrompt?: string;                  // 自定义提示词
+  
+  // 图片识别选项 (新增)
+  ocrSettings?: {
+    language: 'zh' | 'en' | 'auto';      // 识别语言
+    enhanceImage: boolean;                // 是否增强图片质量
+    detectTables: boolean;                // 是否识别表格
+    detectFormulas: boolean;              // 是否识别数学公式
+  };
 }
 
 /**
@@ -226,10 +236,11 @@ export interface SaveQuestionsRequest {
  */
 export const DEFAULT_GENERATION_CONFIG: GenerationConfig = {
   mode: GenerationMode.TEXT_DESCRIPTION,
-  subject: '数学',
-  grade: '高中一年级',
+  subject: undefined,                     // 改为可选
+  grade: undefined,                       // 改为可选
   description: '',
   uploadedFiles: [],
+  uploadedImages: [],                     // 新增
   questionTypes: {
     [QuestionType.SINGLE_CHOICE]: {
       count: 5,
@@ -253,7 +264,13 @@ export const DEFAULT_GENERATION_CONFIG: GenerationConfig = {
     }
   },
   includeExplanation: true,
-  autoGenerateKnowledgePoints: true
+  autoGenerateKnowledgePoints: true,
+  ocrSettings: {                          // 新增默认OCR设置
+    language: 'auto',
+    enhanceImage: true,
+    detectTables: true,
+    detectFormulas: true
+  }
 };
 
 /**

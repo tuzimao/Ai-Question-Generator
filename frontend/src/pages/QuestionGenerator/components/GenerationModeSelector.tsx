@@ -62,13 +62,25 @@ const MODE_CONFIG = {
     color: 'secondary' as const,
     recommended: true
   },
+  [GenerationMode.IMAGE_IMPORT]: {
+    title: '图片导入题目',
+    description: '上传题目图片或截图，AI将识别并导入现有题目',
+    icon: <Palette fontSize="large" />,
+    features: [
+      'OCR智能识别题目内容',
+      '支持JPG、PNG、PDF格式',
+      '自动识别数学公式和表格'
+    ],
+    color: 'warning' as const,
+    recommended: false
+  },
   [GenerationMode.MANUAL_CREATE]: {
     title: '手动创建题目',
     description: '完全手动创建题目，适合有明确题目要求的场景',
     icon: <Create fontSize="large" />,
     features: [
       '完全自主控制题目内容',
-      '适合创建特定格式题目',
+      '在编辑器中选择题目类型',
       '可参考AI建议优化'
     ],
     color: 'success' as const,
@@ -255,7 +267,7 @@ export const GenerationModeSelector: React.FC<GenerationModeSelectorProps> = ({
       >
         <Grid container spacing={3}>
           {Object.entries(MODE_CONFIG).map(([mode, config]) => (
-            <Grid item xs={12} md={4} key={mode}>
+            <Grid item xs={12} md={3} key={mode}>
               <ModeCard
                 mode={mode as GenerationMode}
                 config={config}
@@ -290,6 +302,8 @@ export const GenerationModeSelector: React.FC<GenerationModeSelectorProps> = ({
                 '在描述中尽量具体说明知识点、难度要求和题目风格，这样AI能生成更符合您期望的题目。'}
               {selectedMode === GenerationMode.FILE_UPLOAD && 
                 '支持上传PDF、Word、PowerPoint等格式的教学材料。文件内容越丰富，生成的题目质量越高。'}
+              {selectedMode === GenerationMode.IMAGE_IMPORT && 
+                '支持上传JPG、PNG、PDF格式的题目图片。AI将智能识别图片中的题目内容，包括文字、公式和表格。'}
               {selectedMode === GenerationMode.MANUAL_CREATE && 
                 '可以先创建题目框架，然后使用AI助手来优化题目表述和生成解析内容。'}
             </Typography>
