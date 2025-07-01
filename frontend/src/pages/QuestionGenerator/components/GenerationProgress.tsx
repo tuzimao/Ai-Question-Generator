@@ -1,58 +1,27 @@
-// frontend/src/pages/QuestionGenerator/components/GenerationProgress.tsx
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  LinearProgress,
-  Button,
-  Alert,
-  Grid,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  Fade,
-  CircularProgress
+  Box, Card, CardContent, Typography, LinearProgress, Button, Alert, Grid, List, ListItem,
+  ListItemIcon, ListItemText, Fade, CircularProgress
 } from '@mui/material';
 import {
-  AutoAwesome,
-  CheckCircle,
-  Schedule,
-  Psychology,
-  Stop,
-  Pause,
-  PlayArrow,
-  Refresh,
-  ArrowBack,
-  Speed,
-  TrendingUp,
-  Error as ErrorIcon,
-  Warning
+  AutoAwesome, Schedule, Psychology, Stop, Pause, PlayArrow, Refresh, ArrowBack, Speed,
+  TrendingUp, Error as ErrorIcon, Warning
 } from '@mui/icons-material';
 
 import { GenerationMode, GenerationStatus } from '@/types/generator';
-import { AIGenerationService, ProgressUpdate } from '@/services/aiGenerationService';
+import { AIGenerationService, ProgressUpdate, Question } from '@/services/aiGenerationService';
 
-/**
- * 生成进度组件的 Props 接口
- */
 interface GenerationProgressProps {
-  progress: any;                         // 进度信息 (暂时用any)
-  status: GenerationStatus;              // 生成状态
-  mode: GenerationMode;                  // 生成模式
-  config: any;                          // 生成配置
-  onComplete: (result: any) => void;    // 完成回调
-  onCancel?: () => void;                // 取消回调
-  onRetry?: () => void;                 // 重试回调
-  onBack?: () => void;                  // 返回回调
+  progress: any;
+  status: GenerationStatus;
+  mode: GenerationMode;
+  config: any;
+  onComplete: (result: any) => void;
+  onCancel?: () => void;
+  onRetry?: () => void;
+  onBack?: () => void;
 }
 
-/**
- * 生成日志条目接口
- */
 interface LogEntry {
   id: string;
   timestamp: string;
@@ -60,10 +29,6 @@ interface LogEntry {
   type: 'info' | 'success' | 'warning' | 'error';
 }
 
-/**
- * AI生成进度组件
- * 使用真实的AI API进行题目生成
- */
 export const GenerationProgress: React.FC<GenerationProgressProps> = ({
   status,
   mode,
@@ -73,7 +38,8 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
   onRetry,
   onBack
 }) => {
-  // 生成状态
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [generationLogs, setGenerationLogs] = useState<LogEntry[]>([]);
   const [currentProgress, setCurrentProgress] = useState<ProgressUpdate | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [startTime, setStartTime] = useState<Date | null>(null);
@@ -81,84 +47,64 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generationService] = useState(() => new AIGenerationService());
+  const [isComplete, setIsComplete] = useState(false);
+  const [finalResult, setFinalResult] = useState<any>(null);
 
-  // 生成日志
-  const [generationLogs, setGenerationLogs] = useState<LogEntry[]>([]);
-
-  /**
-   * 添加日志条目
-   */
+  // addLog 必须在 useEffect 之前定义！
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     const id = `${Date.now()}-${Math.random()}`;
-    
     setGenerationLogs(prev => [...prev, { id, timestamp, message, type }]);
   }, []);
 
-  /**
-   * 启动真实AI生成过程
-   */
+  // 实时题目推送
+  useEffect(() => {
+    generationService.onQuestionReceived((q: Question) => {
+      setQuestions(prev => [...prev, q]);
+      addLog(`✅ 已生成题目：${q.content?.title?.slice(0, 20) ?? ''}...`, 'success');
+    });
+    // eslint-disable-next-line
+  }, [generationService, addLog]);
+
+  // 启动生成
   const startRealGeneration = useCallback(async () => {
     if (isGenerating) return;
-    
     setIsGenerating(true);
     setStartTime(new Date());
     setError(null);
     setCurrentProgress(null);
+    setQuestions([]); // 新增：每次重新生成时清空题目列表
     addLog('🚀 开始AI题目生成...', 'info');
-    
+
     try {
-      // 验证配置
       if (mode !== GenerationMode.TEXT_DESCRIPTION) {
         throw new Error('当前版本仅支持文字描述生成模式');
       }
-
-      // 开始生成
       const generator = generationService.generateQuestions(config);
       let finalResult: any = null;
-      
+
       for await (const update of generator) {
-        // 检查是否已暂停或取消
         if (isPaused) {
           addLog('⏸️ 生成已暂停', 'warning');
           continue;
         }
-        
         setCurrentProgress(update);
-        
+
         switch (update.type) {
           case 'progress':
             addLog(update.message || `${update.stage} (${Math.round(update.percentage)}%)`, 'info');
             break;
-            
           case 'question':
-            if (update.question) {
-              const titlePreview = update.question.content.title.substring(0, 30);
-              addLog(`✅ 生成题目: ${titlePreview}...`, 'success');
-            }
+            // 题目在 onQuestionReceived 已处理，无需重复 addLog
             break;
-            
-          case 'completed':
+
+            // 
+            case 'completed':
             addLog('🎉 所有题目生成完成！', 'success');
             setIsGenerating(false);
-            
-            // 如果有最终结果，传递给父组件
-            if (finalResult) {
-              setTimeout(() => {
-                onComplete(finalResult);
-              }, 1000);
-            } else {
-              // 创建默认结果
-              setTimeout(() => {
-                onComplete({
-                  questions: [],
-                  totalCount: 0,
-                  generationTime: elapsedTime
-                });
-              }, 1000);
-            }
+            setIsComplete(true);
+            setFinalResult({ questions, totalCount: questions.length, generationTime: elapsedTime });
             return;
-            
           case 'error':
             const errorMsg = update.error || '生成过程中发生错误';
             setError(errorMsg);
@@ -167,58 +113,39 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
             return;
         }
       }
-      
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '未知错误';
       setError(errorMessage);
       addLog(`❌ 生成失败: ${errorMessage}`, 'error');
       setIsGenerating(false);
-      
-      // 开发模式下显示详细错误
       if (process.env.NODE_ENV === 'development') {
-        console.error('AI生成详细错误:', {
-          error,
-          config,
-          mode,
-          timestamp: new Date().toISOString()
-        });
+        console.error('AI生成详细错误:', { error, config, mode, timestamp: new Date().toISOString() });
       }
     }
-  }, [isGenerating, mode, config, generationService, addLog, isPaused, elapsedTime, onComplete]);
+    // eslint-disable-next-line
+  }, [isGenerating, mode, config, generationService, addLog, isPaused, elapsedTime, onComplete, questions]);
 
-  /**
-   * 启动生成过程 - 仅在状态变为GENERATING时触发
-   */
   useEffect(() => {
     if (status === GenerationStatus.GENERATING && !isGenerating && !startTime) {
       startRealGeneration();
     }
+    // eslint-disable-next-line
   }, [status, isGenerating, startTime, startRealGeneration]);
 
-  /**
-   * 更新已用时间
-   */
   useEffect(() => {
     if (startTime && isGenerating && !isPaused) {
       const timer = setInterval(() => {
         setElapsedTime(Date.now() - startTime.getTime());
-      }, 1000); // 每秒更新一次
-      
+      }, 1000);
       return () => clearInterval(timer);
     }
   }, [startTime, isGenerating, isPaused]);
 
-  /**
-   * 暂停/继续生成
-   */
+  // 控制按钮相关
   const handlePauseResume = useCallback(() => {
     setIsPaused(!isPaused);
     addLog(isPaused ? '▶️ 继续生成' : '⏸️ 生成已暂停', 'warning');
   }, [isPaused, addLog]);
-
-  /**
-   * 停止生成
-   */
   const handleStop = useCallback(() => {
     generationService.cancelGeneration();
     setIsGenerating(false);
@@ -226,12 +153,7 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
     addLog('⏹️ 生成已停止', 'warning');
     onCancel?.();
   }, [generationService, addLog, onCancel]);
-
-  /**
-   * 重试生成
-   */
   const handleRetry = useCallback(() => {
-    // 重置所有状态
     setCurrentProgress(null);
     setIsGenerating(false);
     setStartTime(null);
@@ -239,53 +161,31 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
     setError(null);
     setIsPaused(false);
     setGenerationLogs([]);
-    
+    setQuestions([]); // 重新生成时清空题目
     addLog('🔄 重新开始生成...', 'info');
     onRetry?.();
   }, [addLog, onRetry]);
-
-  /**
-   * 返回配置页面
-   */
   const handleBack = useCallback(() => {
-    // 如果正在生成，先停止
     if (isGenerating) {
       generationService.cancelGeneration();
     }
     onBack?.();
   }, [isGenerating, generationService, onBack]);
 
-  /**
-   * 获取总体进度百分比
-   */
-  const getTotalProgress = (): number => {
-    return currentProgress?.percentage || 0;
-  };
-
-  /**
-   * 格式化时间
-   */
-  const formatTime = (ms: number): string => {
+  // 其它工具函数
+  const getTotalProgress = () => currentProgress?.percentage || 0;
+  const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     return `${minutes.toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
   };
-
-  /**
-   * 获取预计剩余时间
-   */
-  const getEstimatedRemaining = (): number => {
+  const getEstimatedRemaining = () => {
     const progress = getTotalProgress();
     if (progress === 0 || progress >= 100) return 0;
-    
     const estimatedTotal = (elapsedTime / progress) * 100;
     return Math.max(0, estimatedTotal - elapsedTime);
   };
-
-  /**
-   * 获取日志颜色
-   */
-  const getLogColor = (type: LogEntry['type']): string => {
+  const getLogColor = (type: LogEntry['type']) => {
     switch (type) {
       case 'success': return 'success.main';
       case 'warning': return 'warning.main';
@@ -293,22 +193,14 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
       default: return 'text.primary';
     }
   };
-
-  /**
-   * 获取当前阶段描述
-   */
-  const getCurrentStageDescription = (): string => {
+  const getCurrentStageDescription = () => {
     if (error) return '生成失败';
     if (!isGenerating && currentProgress?.type === 'completed') return '生成完成';
     if (!isGenerating) return '准备生成';
     if (isPaused) return '生成已暂停';
     return currentProgress?.stage || '正在生成';
   };
-
-  /**
-   * 获取模式显示名称
-   */
-  const getModeDisplayName = (): string => {
+  const getModeDisplayName = () => {
     switch (mode) {
       case GenerationMode.TEXT_DESCRIPTION: return '文字描述生成';
       case GenerationMode.FILE_UPLOAD: return '文件上传生成';
@@ -318,9 +210,64 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
     }
   };
 
+  // 实时预览组件
+  const RealTimePreview = () => (
+    <Card elevation={1} sx={{ mb: 3 }}>
+      <CardContent>
+        <Typography variant="h6" fontWeight="bold" gutterBottom>
+          AI 实时生成题目预览 🪄
+        </Typography>
+        <Box sx={{ height: 300, overflowY: 'auto', p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+          {questions.map((q, index) => (
+            <Box key={q.id || index} sx={{ mb: 2, pb: 2, borderBottom: '1px solid #eee' }}>
+              <Typography variant="subtitle2" fontWeight="bold">
+                {index + 1}.【
+                {q.type === 'single_choice'
+                  ? '单选题'
+                  : q.type === 'multiple_choice'
+                  ? '多选题'
+                  : q.type === 'true_false'
+                  ? '判断题'
+                  : '简答题'}】 ({q.difficulty})
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {q.content?.title}
+              </Typography>
+              {Array.isArray(q.options) && q.options.length > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  {q.options.map((opt, idx) => (
+                    <Typography key={idx} variant="body2">
+                      {String.fromCharCode(65 + idx)}. {typeof opt === 'string' ? opt : opt.text || ''}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                答案: {Array.isArray(q.correctAnswer) ? q.correctAnswer.join(', ') : q.correctAnswer}
+              </Typography>
+              {typeof q.explanation === 'string' ? (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  解析: {q.explanation.slice(0, 60)}...
+                </Typography>
+              ) : q.explanation?.text && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  解析: {q.explanation.text.slice(0, 60)}...
+                </Typography>
+              )}
+            </Box>
+          ))}
+          {questions.length === 0 && (
+            <Typography variant="caption" color="text.secondary">
+              正在等待题目生成...
+            </Typography>
+          )}
+        </Box>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <Box>
-      {/* 标题区域 */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h5" fontWeight="bold" gutterBottom>
           {mode === GenerationMode.IMAGE_IMPORT ? 'AI识别题目中' : 'AI生成题目中'}
@@ -330,53 +277,31 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
         </Typography>
       </Box>
 
-      {/* 错误提示 */}
       {error && (
-        <Alert 
-          severity="error" 
-          sx={{ mb: 3 }}
-          action={
-            <Button color="inherit" size="small" onClick={handleRetry}>
-              重试
-            </Button>
-          }
-        >
+        <Alert severity="error" sx={{ mb: 3 }}
+          action={<Button color="inherit" size="small" onClick={handleRetry}>重试</Button>}>
           <Typography variant="body2">
             <strong>生成失败：</strong>{error}
           </Typography>
         </Alert>
       )}
 
-      {/* 主进度卡片 */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          {/* 总体进度 */}
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Typography variant="h6" fontWeight="bold">
-                总体进度
-              </Typography>
-              <Typography variant="h6" color="primary.main" fontWeight="bold">
-                {Math.round(getTotalProgress())}%
-              </Typography>
+              <Typography variant="h6" fontWeight="bold">总体进度</Typography>
+              <Typography variant="h6" color="primary.main" fontWeight="bold">{Math.round(getTotalProgress())}%</Typography>
             </Box>
-            
-            <LinearProgress
-              variant="determinate"
-              value={getTotalProgress()}
-              sx={{
-                height: 12,
+            <LinearProgress variant="determinate" value={getTotalProgress()} sx={{
+              height: 12, borderRadius: 6, backgroundColor: 'action.hover',
+              '& .MuiLinearProgress-bar': {
                 borderRadius: 6,
-                backgroundColor: 'action.hover',
-                '& .MuiLinearProgress-bar': {
-                  borderRadius: 6,
-                  background: error ? 
-                    'linear-gradient(45deg, #f44336, #ff5722)' :
-                    'linear-gradient(45deg, #1976d2, #42a5f5)'
-                }
-              }}
-            />
-            
+                background: error
+                  ? 'linear-gradient(45deg, #f44336, #ff5722)'
+                  : 'linear-gradient(45deg, #1976d2, #42a5f5)'
+              }
+            }} />
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
               <Typography variant="caption" color="text.secondary">
                 <Schedule sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
@@ -388,24 +313,16 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
               </Typography>
             </Box>
           </Box>
-
-          {/* 当前状态 */}
-          <Alert 
-            severity={error ? "error" : isPaused ? "warning" : "info"}
+          <Alert severity={error ? "error" : isPaused ? "warning" : "info"}
             icon={error ? <ErrorIcon /> : isPaused ? <Warning /> : <Psychology />}
-            sx={{ mb: 2 }}
-          >
+            sx={{ mb: 2 }}>
             <Typography variant="body2" fontWeight="bold">
               当前状态: {getCurrentStageDescription()}
             </Typography>
             {currentProgress?.message && !error && (
-              <Typography variant="body2">
-                {currentProgress.message}
-              </Typography>
+              <Typography variant="body2">{currentProgress.message}</Typography>
             )}
           </Alert>
-
-          {/* 控制按钮 */}
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button
               variant="outlined"
@@ -415,7 +332,6 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
             >
               {isPaused ? '继续' : '暂停'}
             </Button>
-            
             <Button
               variant="outlined"
               color="error"
@@ -425,7 +341,6 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
             >
               停止
             </Button>
-            
             <Button
               variant="outlined"
               startIcon={<ArrowBack />}
@@ -433,7 +348,6 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
             >
               重新配置
             </Button>
-            
             <Button
               variant="outlined"
               startIcon={<Refresh />}
@@ -445,9 +359,22 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
         </CardContent>
       </Card>
 
-      {/* 详细信息 */}
+      <RealTimePreview />
+      {isComplete && (
+        <Box sx={{ textAlign: 'center', my: 2 }}>
+            <Button
+            variant="contained"
+            color="primary"
+            size="large"
+            onClick={() => onComplete(finalResult)}
+            sx={{ px: 6, fontWeight: 700, borderRadius: 2 }}
+            >
+            编辑和完善题目
+            </Button>
+        </Box>
+        )}
+
       <Grid container spacing={3}>
-        {/* 生成详情 */}
         <Grid item xs={12} md={6}>
           <Card elevation={1}>
             <CardContent>
@@ -459,65 +386,43 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
                   <ListItemIcon sx={{ minWidth: 36 }}>
                     <Psychology color="primary" />
                   </ListItemIcon>
-                  <ListItemText
-                    primary="AI模型"
-                    secondary={`DeepSeek (${config?.provider || '默认'})`}
-                  />
+                  <ListItemText primary="AI模型" secondary={`DeepSeek (${config?.provider || '默认'})`} />
                 </ListItem>
-                
                 <ListItem sx={{ px: 0 }}>
                   <ListItemIcon sx={{ minWidth: 36 }}>
                     <AutoAwesome color="secondary" />
                   </ListItemIcon>
-                  <ListItemText
-                    primary="生成模式"
-                    secondary={getModeDisplayName()}
-                  />
+                  <ListItemText primary="生成模式" secondary={getModeDisplayName()} />
                 </ListItem>
-                
                 <ListItem sx={{ px: 0 }}>
                   <ListItemIcon sx={{ minWidth: 36 }}>
                     <Speed color="info" />
                   </ListItemIcon>
-                  <ListItemText
-                    primary="进度状态"
-                    secondary={`${currentProgress?.currentStep || 0}/${currentProgress?.totalSteps || 10} 步骤`}
-                  />
+                  <ListItemText primary="进度状态"
+                    secondary={`${currentProgress?.currentStep || 0}/${currentProgress?.totalSteps || 10} 步骤`} />
                 </ListItem>
-
                 {isGenerating && (
                   <ListItem sx={{ px: 0 }}>
                     <ListItemIcon sx={{ minWidth: 36 }}>
                       <CircularProgress size={20} />
                     </ListItemIcon>
-                    <ListItemText
-                      primary="生成状态"
-                      secondary="正在处理中..."
-                    />
+                    <ListItemText primary="生成状态" secondary="正在处理中..." />
                   </ListItem>
                 )}
               </List>
             </CardContent>
           </Card>
         </Grid>
-
-        {/* 生成日志 */}
         <Grid item xs={12} md={6}>
           <Card elevation={1}>
             <CardContent>
               <Typography variant="h6" fontWeight="bold" gutterBottom>
                 生成日志
               </Typography>
-              <Box
-                sx={{
-                  height: 240,
-                  overflow: 'auto',
-                  backgroundColor: 'action.hover',
-                  borderRadius: 1,
-                  p: 1,
-                  fontFamily: 'monospace'
-                }}
-              >
+              <Box sx={{
+                height: 240, overflow: 'auto', backgroundColor: 'action.hover',
+                borderRadius: 1, p: 1, fontFamily: 'monospace'
+              }}>
                 {generationLogs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">
                     等待生成开始...
@@ -525,14 +430,8 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
                 ) : (
                   generationLogs.map((log) => (
                     <Fade in key={log.id}>
-                      <Typography
-                        variant="caption"
-                        component="div"
-                        sx={{
-                          mb: 0.5,
-                          color: getLogColor(log.type)
-                        }}
-                      >
+                      <Typography variant="caption" component="div"
+                        sx={{ mb: 0.5, color: getLogColor(log.type) }}>
                         [{log.timestamp}] {log.message}
                       </Typography>
                     </Fade>
@@ -544,7 +443,6 @@ export const GenerationProgress: React.FC<GenerationProgressProps> = ({
         </Grid>
       </Grid>
 
-      {/* 提示信息 */}
       <Alert severity="info" sx={{ mt: 3 }}>
         <Typography variant="body2">
           <strong>💡 生成提示：</strong>
