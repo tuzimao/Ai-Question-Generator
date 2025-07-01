@@ -192,7 +192,6 @@ ${questionRequirements}
 export class AIGenerationService {
   private config = AIConfigManager.getCurrentConfig();
   private abortController: AbortController | null = null;
-  private _streamContent = '';
 
   /**
    * 验证AI配置
@@ -235,136 +234,68 @@ export class AIGenerationService {
   /**
    * 解析流式响应
    */
-  private async* parseStreamResponse(response: Response): AsyncGenerator<ProgressUpdate, void, unknown> {
-    if (!response.body) {
-      throw new Error('响应体为空');
-    }
+private async* parseStreamResponse(response: Response): AsyncGenerator<ProgressUpdate, void, unknown> {
+  if (!response.body) {
+    throw new Error('响应体为空');
+  }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentStep = 0;
-    const totalSteps = 10; // 预估步骤数
-    let hasContent = false; // 跟踪是否收到了实际内容
-    const processedChunks = new Set(); // 跟踪已处理的内容块
-    
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            
-            // 检查是否为结束标志
-            if (data === '[DONE]') {
-              yield {
-                type: 'completed',
-                stage: '生成完成',
-                percentage: 100,
-                currentStep: totalSteps,
-                totalSteps,
-                message: '所有题目生成完成'
-              };
-              return;
-            }
-            
-            // 跳过空数据
-            if (!data) continue;
-            
-            try {
-              const parsed = JSON.parse(data);
-              const choice = parsed.choices?.[0];
-              
-              // 检查是否有finish_reason，如果有则表示流结束
-              if (choice?.finish_reason) {
-                yield {
-                  type: 'completed',
-                  stage: '生成完成',
-                  percentage: 100,
-                  currentStep: totalSteps,
-                  totalSteps,
-                  message: '所有题目生成完成'
-                };
-                return;
-              }
-              
-              // 检查是否有实际内容（不是空字符串）
-              const content = choice?.delta?.content;
-              
-              // 添加详细的调试日志
-              console.log('流式响应调试:', {
-                content,
-                contentType: typeof content,
-                contentLength: content?.length,
-                trimmedLength: content?.trim?.()?.length,
-                hasContent: content && content.trim().length > 0,
-                currentStep,
-                choice
-              });
-              
-              // 只有当content不为undefined、不为null、不为空字符串时才处理
-              if (content !== undefined && content !== null && content !== '' && content.trim().length > 0) {
-                // 创建内容块的唯一标识符（只基于内容）
-                const chunkId = content;
-                
-                // 检查是否已经处理过这个内容块
-                if (!processedChunks.has(chunkId)) {
-                  processedChunks.add(chunkId);
-                  hasContent = true;
-                  currentStep++;
-                  const percentage = Math.min((currentStep / totalSteps) * 100, 95);
-                  
-                  // 累积流内容
-                  this._streamContent += content;
-                  
-                  console.log('递增步骤:', { currentStep, content: content.substring(0, 50), chunkId });
-                  
-                  yield {
-                    type: 'progress',
-                    stage: '正在生成题目内容',
-                    percentage,
-                    currentStep,
-                    totalSteps,
-                    message: `AI正在思考第${Math.ceil(currentStep/2)}题...`
-                  };
-                } else {
-                  console.log('跳过重复内容:', { content: content.substring(0, 50), chunkId });
-                }
-              } else {
-                // 记录被跳过的情况
-                console.log('跳过空内容:', { content, contentType: typeof content });
-              }
-              
-            } catch (parseError) {
-              console.warn('解析流式响应失败:', parseError, '数据:', data);
-            }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentStep = 0;
+  const totalSteps = 10; // 预估步骤数
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') {
+            yield {
+              type: 'completed',
+              stage: '生成完成',
+              percentage: 100,
+              currentStep: totalSteps,
+              totalSteps,
+              message: '所有题目生成完成'
+            };
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+
+            // 【改动点】不再用 currentStep++ 当做“第几题”
+            // 只做一个虚拟的进度
+            currentStep++;
+            const percentage = Math.min((currentStep / totalSteps) * 100, 95);
+
+            yield {
+              type: 'progress',
+              stage: '正在生成题目内容',
+              percentage,
+              currentStep,
+              totalSteps,
+              // 改动：message 不再拼“第N题”，只显示普通进度
+              message: `AI正在生成题目内容...`
+            };
+
+          } catch (parseError) {
+            console.warn('解析流式响应失败:', parseError);
           }
         }
       }
-      
-      // 如果流结束但没有收到[DONE]标志，手动结束
-      if (hasContent) {
-        yield {
-          type: 'completed',
-          stage: '生成完成',
-          percentage: 100,
-          currentStep: totalSteps,
-          totalSteps,
-          message: '所有题目生成完成'
-        };
-      }
-      
-    } finally {
-      reader.releaseLock();
     }
+  } finally {
+    reader.releaseLock();
   }
+}
 
   /**
    * 解析最终AI响应
@@ -446,9 +377,6 @@ export class AIGenerationService {
       throw new Error('题目类型配置缺失');
     }
 
-    // 清空之前的流内容
-    this._streamContent = '';
-
     // 创建取消控制器
     this.abortController = new AbortController();
     
@@ -514,8 +442,24 @@ export class AIGenerationService {
         }
       }
       
-      // 使用流式响应中收集的内容
-      const fullContent = this._streamContent;
+      // 重新获取完整响应内容（简化处理）
+      // 在实际实现中，应该在流式处理过程中收集内容
+      const finalResponse = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...requestData,
+          stream: false // 获取完整响应
+        }),
+        signal: this.abortController.signal
+      });
+      
+      if (!finalResponse.ok) {
+        throw new Error('获取完整响应失败');
+      }
+      
+      const finalData = await finalResponse.json();
+      const fullContent = finalData.choices?.[0]?.message?.content || '';
       
       yield {
         type: 'progress',
