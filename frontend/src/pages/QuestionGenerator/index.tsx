@@ -168,6 +168,14 @@ export const QuestionGenerator: React.FC = () => {
    * 开始生成题目
    */
   const handleStartGeneration = useCallback(async () => {
+    // 验证配置
+    if (!generatorState.config) {
+      updateGeneratorState({
+        error: '生成配置缺失，请重新配置参数'
+      });
+      return;
+    }
+
     updateGeneratorState({
       status: GenerationStatus.GENERATING,
       error: null
@@ -190,11 +198,15 @@ export const QuestionGenerator: React.FC = () => {
     setActiveStep(1); // 移动到生成/识别步骤
     
     try {
-      // TODO: 实现实际的 AI 生成或OCR识别逻辑
-      console.log('开始处理，配置：', generatorState.config);
+      console.log('开始处理，配置：', {
+        mode: generatorState.config.mode,
+        subject: generatorState.config.subject,
+        grade: generatorState.config.grade,
+        description: generatorState.config.description,
+        questionTypes: generatorState.config.questionTypes
+      });
       
-      // 模拟处理过程
-      // 在实际实现中，这里会调用相应的 API
+      // TODO: 实际的AI生成逻辑在GenerationProgress组件中处理
       
     } catch (error) {
       updateGeneratorState({
@@ -325,11 +337,38 @@ export const QuestionGenerator: React.FC = () => {
             progress={generatorState.progress}
             status={generatorState.status}
             mode={generatorState.config.mode}
-            onComplete={() => {
+            config={generatorState.config}
+            onComplete={(result) => {
+              // 更新生成结果
+              updateGeneratorState({
+                result: {
+                  questions: result.questions || [],
+                  totalCount: result.questions?.length || 0,
+                  generationTime: result.generationTime || 0
+                },
+                status: GenerationStatus.EDITING
+              });
+              
               // 根据模式调整步骤索引
               const nextStepIndex = generatorState.config.mode === GenerationMode.MANUAL_CREATE ? 1 : 2;
               setActiveStep(nextStepIndex);
-              updateGeneratorState({ status: GenerationStatus.EDITING });
+            }}
+            onCancel={() => {
+              updateGeneratorState({ status: GenerationStatus.CONFIGURING });
+              setActiveStep(0);
+            }}
+            onRetry={() => {
+              updateGeneratorState({ 
+                status: GenerationStatus.GENERATING,
+                error: null,
+                result: null
+              });
+              // 重新开始生成步骤
+              setActiveStep(1);
+            }}
+            onBack={() => {
+              updateGeneratorState({ status: GenerationStatus.CONFIGURING });
+              setActiveStep(0);
             }}
           />
         );

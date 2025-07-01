@@ -37,6 +37,7 @@ import {
 import { FileUploadZone } from './FileUploadZone';
 import { ImageUploadZone } from './ImageUploadZone';
 import { QuestionTypeConfig } from './QuestionTypeConfig';
+import { AIConfigManager } from '@/utils/aiConfig';
 import {
   GenerationMode,
   GenerationConfig,
@@ -151,6 +152,11 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
    * 验证配置是否完整
    */
   const validateConfig = (): { isValid: boolean; message?: string } => {
+    // 检查AI模型配置
+    if (!AIConfigManager.isConfigured()) {
+      return { isValid: false, message: '请先在设置中配置AI模型和API密钥' };
+    }
+
     if (config.mode === GenerationMode.TEXT_DESCRIPTION && !config.description.trim()) {
       return { isValid: false, message: '请输入题目生成描述' };
     }
