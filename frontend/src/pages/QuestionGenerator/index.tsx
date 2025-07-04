@@ -1,4 +1,4 @@
-// frontend/src/pages/QuestionGenerator/index.tsx
+// frontend/src/pages/QuestionGenerator/index.tsx (修复数据流传递)
 
 import React, { useState, useCallback } from 'react';
 import {
@@ -28,7 +28,7 @@ import {
   GenerationModeSelector,
   ConfigurationPanel,
   GenerationProgress,
-  QuestionEditor,
+  QuestionEditor,  // ✅ 确保导入简化版
   PreviewMode
 } from './components';
 
@@ -44,7 +44,6 @@ import { Question } from '@/types/question';
 
 /**
  * 生成步骤配置
- * 根据不同的生成模式显示不同的步骤
  */
 const getGenerationSteps = (mode: GenerationMode) => {
   const baseSteps = [
@@ -84,36 +83,23 @@ const getGenerationSteps = (mode: GenerationMode) => {
     icon: <Save />
   };
 
-  // 手动创建模式跳过生成步骤
   if (mode === GenerationMode.MANUAL_CREATE) {
-    return [
-      baseSteps[0],
-      editStep,
-      previewStep,
-      saveStep
-    ];
+    return [baseSteps[0], editStep, previewStep, saveStep];
   }
 
-  return [
-    ...baseSteps,
-    generateStep,
-    editStep,
-    previewStep,
-    saveStep
-  ];
+  return [...baseSteps, generateStep, editStep, previewStep, saveStep];
 };
 
 /**
  * 题目生成器主页面组件
- * 提供完整的题目生成、编辑、预览和保存流程
  */
 export const QuestionGenerator: React.FC = () => {
-  // 主要状态管理
+  // ✅ 主要状态管理
   const [generatorState, setGeneratorState] = useState<GeneratorState>({
     status: GenerationStatus.CONFIGURING,
     config: DEFAULT_GENERATION_CONFIG,
     progress: null,
-    result: null,
+    result: null,  // ✅ 这里会存储AI生成的题目
     error: null,
     editState: null,
     selectedQuestionId: null,
@@ -153,7 +139,6 @@ export const QuestionGenerator: React.FC = () => {
         mode
       }
     });
-    // 重置到第一步
     setActiveStep(0);
   }, [generatorState.config, updateGeneratorState]);
 
@@ -168,7 +153,8 @@ export const QuestionGenerator: React.FC = () => {
    * 开始生成题目
    */
   const handleStartGeneration = useCallback(async () => {
-    // 验证配置
+    console.log('🚀 开始生成题目，当前配置:', generatorState.config);
+    
     if (!generatorState.config) {
       updateGeneratorState({
         error: '生成配置缺失，请重新配置参数'
@@ -178,10 +164,10 @@ export const QuestionGenerator: React.FC = () => {
 
     updateGeneratorState({
       status: GenerationStatus.GENERATING,
-      error: null
+      error: null,
+      result: null  // ✅ 清空之前的结果
     });
     
-    // 手动创建模式直接跳到编辑步骤
     if (generatorState.config.mode === GenerationMode.MANUAL_CREATE) {
       updateGeneratorState({
         status: GenerationStatus.EDITING,
@@ -191,35 +177,56 @@ export const QuestionGenerator: React.FC = () => {
           generationTime: 0
         }
       });
-      setActiveStep(1); // 跳到编辑步骤（因为没有生成步骤）
+      setActiveStep(1);
       return;
     }
     
-    setActiveStep(1); // 移动到生成/识别步骤
-    
-    try {
-      console.log('开始处理，配置：', {
-        mode: generatorState.config.mode,
-        subject: generatorState.config.subject,
-        grade: generatorState.config.grade,
-        description: generatorState.config.description,
-        questionTypes: generatorState.config.questionTypes
-      });
-      
-      // TODO: 实际的AI生成逻辑在GenerationProgress组件中处理
-      
-    } catch (error) {
-      updateGeneratorState({
-        status: GenerationStatus.IDLE,
-        error: error instanceof Error ? error.message : '处理失败'
-      });
-    }
+    setActiveStep(1); // 移动到生成步骤
   }, [generatorState.config, updateGeneratorState]);
+
+  /**
+   * ✅ 关键：处理AI生成完成
+   */
+  const handleGenerationComplete = useCallback((result: any) => {
+    console.log('🎉 AI生成完成，收到结果:', result);
+    
+    // ✅ 确保result包含questions数组
+    const questions = result?.questions || [];
+    console.log('📝 题目数量:', questions.length);
+    
+    if (questions.length === 0) {
+      updateGeneratorState({
+        error: '生成结果为空，请重试',
+        status: GenerationStatus.CONFIGURING
+      });
+      setActiveStep(0);
+      return;
+    }
+
+    // ✅ 更新状态并进入编辑模式
+    updateGeneratorState({
+      status: GenerationStatus.EDITING,
+      result: {
+        questions: questions,
+        totalCount: questions.length,
+        generationTime: result.generationTime || 0
+      },
+      error: null
+    });
+    
+    // ✅ 移动到编辑步骤
+    const editStepIndex = generatorState.config.mode === GenerationMode.MANUAL_CREATE ? 1 : 2;
+    setActiveStep(editStepIndex);
+    
+    console.log('✅ 状态更新完成，进入编辑模式');
+  }, [generatorState.config.mode, updateGeneratorState]);
 
   /**
    * 处理题目编辑
    */
   const handleQuestionEdit = useCallback((questionId: string, updatedQuestion: Question) => {
+    console.log('📝 编辑题目:', questionId, updatedQuestion.content?.title);
+    
     if (!generatorState.result) return;
 
     const updatedQuestions = generatorState.result.questions.map(q =>
@@ -238,11 +245,12 @@ export const QuestionGenerator: React.FC = () => {
    * 进入预览模式
    */
   const handleEnterPreview = useCallback(() => {
+    console.log('👀 进入预览模式');
     updateGeneratorState({
       isPreviewMode: true,
       status: GenerationStatus.PREVIEWING
     });
-    setActiveStep(currentSteps.length - 2); // 移动到预览步骤
+    setActiveStep(currentSteps.length - 2);
   }, [updateGeneratorState, currentSteps.length]);
 
   /**
@@ -252,9 +260,9 @@ export const QuestionGenerator: React.FC = () => {
     updateGeneratorState({
       isPreviewMode: false,
       status: GenerationStatus.EDITING,
-      userAnswers: [] // 清空答题记录
+      userAnswers: []
     });
-    setActiveStep(currentSteps.length - 3); // 回到编辑步骤
+    setActiveStep(currentSteps.length - 3);
   }, [updateGeneratorState, currentSteps.length]);
 
   /**
@@ -266,8 +274,7 @@ export const QuestionGenerator: React.FC = () => {
     updateGeneratorState({ status: GenerationStatus.SAVING });
 
     try {
-      // TODO: 实现保存逻辑
-      console.log('保存题目：', generatorState.result.questions);
+      console.log('💾 保存题目:', generatorState.result.questions);
       
       updateGeneratorState({
         status: GenerationStatus.COMPLETED,
@@ -275,7 +282,7 @@ export const QuestionGenerator: React.FC = () => {
         lastSavedAt: new Date()
       });
       
-      setActiveStep(currentSteps.length - 1); // 移动到保存步骤
+      setActiveStep(currentSteps.length - 1);
       
     } catch (error) {
       updateGeneratorState({
@@ -308,13 +315,15 @@ export const QuestionGenerator: React.FC = () => {
   }, []);
 
   /**
-   * 渲染当前步骤的内容
+   * ✅ 渲染当前步骤的内容
    */
   const renderStepContent = () => {
     const currentStep = getCurrentStep();
     
+    console.log('🎨 渲染步骤:', currentStep.id, '状态:', generatorState.status);
+    
     switch (currentStep.id) {
-      case 'configure': // 配置步骤
+      case 'configure':
         return (
           <Box>
             <GenerationModeSelector
@@ -331,28 +340,14 @@ export const QuestionGenerator: React.FC = () => {
           </Box>
         );
 
-      case 'generate': // 生成/识别步骤
+      case 'generate':
         return (
           <GenerationProgress
             progress={generatorState.progress}
             status={generatorState.status}
             mode={generatorState.config.mode}
             config={generatorState.config}
-            onComplete={(result) => {
-              // 更新生成结果
-              updateGeneratorState({
-                result: {
-                  questions: result.questions || [],
-                  totalCount: result.questions?.length || 0,
-                  generationTime: result.generationTime || 0
-                },
-                status: GenerationStatus.EDITING
-              });
-              
-              // 根据模式调整步骤索引
-              const nextStepIndex = generatorState.config.mode === GenerationMode.MANUAL_CREATE ? 1 : 2;
-              setActiveStep(nextStepIndex);
-            }}
+            onComplete={handleGenerationComplete}  // ✅ 关键回调
             onCancel={() => {
               updateGeneratorState({ status: GenerationStatus.CONFIGURING });
               setActiveStep(0);
@@ -363,7 +358,6 @@ export const QuestionGenerator: React.FC = () => {
                 error: null,
                 result: null
               });
-              // 重新开始生成步骤
               setActiveStep(1);
             }}
             onBack={() => {
@@ -373,10 +367,31 @@ export const QuestionGenerator: React.FC = () => {
           />
         );
 
-      case 'edit': // 编辑步骤
+      case 'edit':
+        // ✅ 关键：确保传递正确的题目数据
+        const questionsToEdit = generatorState.result?.questions || [];
+        console.log('📋 传递给编辑器的题目:', questionsToEdit.length, '道题目');
+        
+        if (questionsToEdit.length === 0) {
+          return (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography variant="h6" color="text.secondary">
+                暂无题目数据
+              </Typography>
+              <Button 
+                variant="outlined" 
+                onClick={() => setActiveStep(0)}
+                sx={{ mt: 2 }}
+              >
+                返回重新生成
+              </Button>
+            </Box>
+          );
+        }
+
         return (
           <QuestionEditor
-            questions={generatorState.result?.questions || []}
+            questions={questionsToEdit}  // ✅ 传递题目数据
             onQuestionEdit={handleQuestionEdit}
             onPreview={handleEnterPreview}
             selectedQuestionId={generatorState.selectedQuestionId}
@@ -385,7 +400,7 @@ export const QuestionGenerator: React.FC = () => {
           />
         );
 
-      case 'preview': // 预览步骤
+      case 'preview':
         return (
           <PreviewMode
             questions={generatorState.result?.questions || []}
@@ -398,7 +413,7 @@ export const QuestionGenerator: React.FC = () => {
           />
         );
 
-      case 'save': // 保存步骤
+      case 'save':
         return (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="h5" color="success.main" gutterBottom>
@@ -445,6 +460,18 @@ export const QuestionGenerator: React.FC = () => {
             {generatorState.error}
           </Alert>
         </Fade>
+      )}
+
+      {/* ✅ 调试信息（开发模式下显示） */}
+      {process.env.NODE_ENV === 'development' && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Typography variant="caption">
+            🛠️ <strong>调试信息：</strong> 
+            当前步骤: {getCurrentStep().id} | 
+            状态: {generatorState.status} | 
+            题目数量: {generatorState.result?.questions?.length || 0}
+          </Typography>
+        </Alert>
       )}
 
       {/* 主要内容区域 */}

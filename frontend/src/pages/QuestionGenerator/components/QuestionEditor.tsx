@@ -46,6 +46,7 @@ interface QuestionEditorProps {
   disabled?: boolean;                             
 }
 
+
 /**
  * 获取题目类型图标和标签
  */
@@ -84,6 +85,7 @@ interface QuestionDisplayProps {
   index: number;
   onEdit: (question: Question) => void;
 }
+
 
 const QuestionDisplay: React.FC<QuestionDisplayProps> = ({ question, index, onEdit }) => {
   const typeInfo = getQuestionTypeInfo(question.type);
