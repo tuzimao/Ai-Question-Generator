@@ -446,6 +446,7 @@ export class AIGenerationService {
     if (!config.questionTypes) throw new Error('题目类型配置缺失');
     
     this.abortController = new AbortController();
+    const startTime = Date.now();   // 仍然可以统计耗时
 
     try {
       yield {
