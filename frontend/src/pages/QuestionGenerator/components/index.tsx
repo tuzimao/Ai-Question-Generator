@@ -1,8 +1,7 @@
-// frontend/src/pages/QuestionGenerator/components/index.tsx
+// frontend/src/pages/QuestionGenerator/components/index.tsx (更新版本)
 
 /**
  * 题目生成器组件统一导出
- * 便于其他模块导入使用
  */
 
 export { GenerationModeSelector } from './GenerationModeSelector';
@@ -12,32 +11,23 @@ export { ImageUploadZone } from './ImageUploadZone';
 export { QuestionTypeConfig } from './QuestionTypeConfig';
 export { GenerationProgress } from './GenerationProgress';
 
-// 导出QuestionEditor相关组件
-export { QuestionEditor } from './QuestionEditor/QuestionEditor';
+// ✅ 重要：导出简化版QuestionEditor（确保这个文件存在）
+export { QuestionEditor } from './QuestionEditor';
 
-// 临时占位组件导出 - PreviewMode还未实现
-export const PreviewMode = (props: any) => <div>预览模式组件 - 待实现</div>;// frontend/src/pages/QuestionGenerator/components/QuestionEditor/index.ts
-
-/**
- * QuestionEditor 组件统一导出
- * 便于其他模块导入使用
- */
-export { QuestionList } from './QuestionEditor/QuestionList';
-export { DetailEditor } from './QuestionEditor/DetailEditor';
-export { ContentEditor } from './QuestionEditor/SubComponents';
-export { OptionEditor } from './QuestionEditor/OptionEditor';
-export { SearchAndFilter } from './QuestionEditor/SearchAndFilter';
-export { TagManager } from './QuestionEditor/TagManager';
-
-// 导出Hook
-export { useQuestionEditor } from '@/hooks/useQuestionEditor';
-
-// 导出类型定义
-export type {
-  EditableQuestion,
-  QuestionEditorState,
-  ValidationResult,
-  ValidationError,
-  EditorAction,
-  QuestionEditorConfig
-} from '@/types/editor';
+// 临时预览模式组件
+export const PreviewMode = (props: any) => (
+  <div style={{ 
+    padding: '3rem', 
+    textAlign: 'center', 
+    backgroundColor: '#f5f5f5',
+    borderRadius: '8px',
+    color: '#666' 
+  }}>
+    <h3>📋 预览模式组件</h3>
+    <p>即将实现题目预览和测试功能</p>
+    <p>当前题目数量: <strong>{props.questions?.length || 0}</strong></p>
+    <div style={{ marginTop: '1rem', color: '#999', fontSize: '0.9rem' }}>
+      功能包括：在线答题、计时、结果统计、打印导出等
+    </div>
+  </div>
+);

@@ -1,3 +1,5 @@
+// frontend/src/services/aiGenerationService.ts (修复版本)
+
 import { AIConfigManager } from '@/utils/aiConfig';
 import { GenerationConfig } from '@/types/generator';
 import { Question, QuestionType, Difficulty } from '@/types/question';
@@ -17,37 +19,20 @@ export interface ProgressUpdate {
 }
 
 /**
- * AI响应格式接口
- */
-interface AIResponse {
-  success: boolean;
-  metadata?: {
-    totalQuestions: number;
-    generationTime: number;
-    model: string;
-    cost?: {
-      inputTokens: number;
-      outputTokens: number;
-      estimatedCost: number;
-    };
-  };
-  questions: Question[];
-  suggestions?: string[];
-}
-
-/**
- * 提示词模板
+ * 提示词模板 - 修复版本
  */
 class PromptBuilder {
   static buildSystemPrompt(): string {
     return `你是一位资深的教育专家和题目设计师，专门负责根据用户需求生成高质量的练习题目。
-要求：
-1. 题目表述清晰准确，符合对应年级学生的认知水平
-2. 选择题的选项设计合理，干扰项有效但不误导学生
-3. 每道题目都要包含详细的解析和知识点说明
-4. 严格按照指定的JSON格式返回结果，不要包含任何其他内容
 
-返回格式必须是有效的JSON，包含以下结构：
+严格要求：
+1. 必须严格按照用户指定的题目类型和数量生成题目
+2. 单选题只能有一个正确答案，多选题可以有多个正确答案
+3. 选项标识使用简单的A、B、C、D格式，不要重复
+4. 题目表述清晰准确，符合指定的难度级别
+5. 每道题目都要包含详细的解析和相关标签
+
+返回格式必须是有效的JSON，结构如下：
 {
   "success": true,
   "metadata": {
@@ -55,33 +40,42 @@ class PromptBuilder {
     "generationTime": 数字,
     "model": "使用的模型名称"
   },
-  "questions": [题目数组],
-  "suggestions": ["建议数组"]
+  "questions": [
+    {
+      "id": "唯一标识",
+      "type": "题目类型(single_choice/multiple_choice/true_false/short_answer)",
+      "difficulty": "难度级别(easy/medium/hard)",
+      "content": {
+        "title": "题目内容",
+        "format": "markdown"
+      },
+      "options": [
+        {"id": "A", "text": "选项A内容", "isCorrect": false},
+        {"id": "B", "text": "选项B内容", "isCorrect": true}
+      ],
+      "correctAnswer": "A" // 单选题为字符串，多选题为数组 ["A", "B"]
+      "explanation": {
+        "text": "详细解析",
+        "format": "markdown"
+      },
+      "tags": ["标签1", "标签2", "标签3"],
+      "knowledgePoints": ["知识点1", "知识点2"],
+      "estimatedTime": 预计答题时间(秒),
+      "score": 分值
+    }
+  ]
 }
-每道题目的格式：
-{
-  "id": "唯一标识",
-  "type": "题目类型",
-  "difficulty": "难度级别",
-  "content": {
-    "title": "题目内容",
-    "format": "markdown"
-  },
-  "options": [选项数组] (仅选择题和判断题),
-  "correctAnswer": 正确答案,
-  "explanation": {
-    "text": "详细解析",
-    "format": "markdown"
-  },
-  "knowledgePoints": ["知识点数组"],
-  "tags": ["标签数组"],
-  "estimatedTime": 预计答题时间(秒),
-  "score": 分值
-}`;
+
+重要注意事项：
+- 不要输出任何除JSON之外的内容
+- 确保题目类型与用户要求完全一致
+- 选项ID使用A、B、C、D，不要重复
+- 判断题的选项固定为 [{"id": "true", "text": "正确"}, {"id": "false", "text": "错误"}]`;
   }
 
   static buildUserPrompt(config: GenerationConfig): string {
     if (!config) throw new Error('生成配置不能为空');
+    
     const {
       subject = '通用',
       grade = '通用',
@@ -89,9 +83,8 @@ class PromptBuilder {
       description = '',
       questionTypes = {}
     } = config;
-    if (!questionTypes || typeof questionTypes !== 'object') {
-      throw new Error('题目类型配置缺失或格式错误');
-    }
+
+    // 验证并处理题目类型配置
     const enabledTypes = Object.entries(questionTypes)
       .filter(([_, typeConfig]) => typeConfig && typeConfig.enabled)
       .map(([type, typeConfig]) => ({
@@ -101,46 +94,68 @@ class PromptBuilder {
       }));
 
     if (enabledTypes.length === 0) throw new Error('没有启用的题目类型');
+    
     const totalQuestions = enabledTypes.reduce((sum, t) => sum + t.count, 0);
     if (totalQuestions === 0) throw new Error('题目总数不能为0');
+
+    // 题目类型映射
     const typeNames = {
       'single_choice': '单选题',
       'multiple_choice': '多选题',
       'true_false': '判断题',
       'short_answer': '简答题'
     };
+
     const difficultyNames = {
       'easy': '简单',
       'medium': '中等',
       'hard': '困难'
     };
+
+    // 生成详细的题目要求
     const questionRequirements = enabledTypes.map(({ type, count, difficulty }) => {
       const typeName = typeNames[type as keyof typeof typeNames] || type;
       const difficultyName = difficultyNames[difficulty as keyof typeof difficultyNames] || difficulty;
-      return `${typeName}：${count}道，难度${difficultyName}`;
+      
+      let typeInstruction = '';
+      switch (type) {
+        case 'single_choice':
+          typeInstruction = '单选题：4个选项(A、B、C、D)，只有1个正确答案，correctAnswer为字符串如"A"';
+          break;
+        case 'multiple_choice':
+          typeInstruction = '多选题：4个选项(A、B、C、D)，可有多个正确答案，correctAnswer为数组如["A", "C"]';
+          break;
+        case 'true_false':
+          typeInstruction = '判断题：2个选项(true为"正确"，false为"错误")，correctAnswer为"true"或"false"';
+          break;
+        case 'short_answer':
+          typeInstruction = '简答题：无选项，correctAnswer为参考答案字符串';
+          break;
+      }
+      
+      return `${count}道${typeName}(难度：${difficultyName}) - ${typeInstruction}`;
     }).join('\n');
 
-    return `请根据以下要求生成${totalQuestions}道练习题目：
+    return `请根据以下要求严格生成${totalQuestions}道练习题目：
 
 学科信息：
 - 科目：${subject}
 - 年级：${grade}
 - 教材：${textbook}
 
-生成要求：
+内容要求：
 ${description || '请生成标准的练习题目'}
 
-题目配置：
+题目配置（严格按照以下要求生成）：
 ${questionRequirements}
 
-注意事项：
-1. 确保题目内容准确，难度适中
-2. 选择题要有4个选项（A、B、C、D）
-3. 判断题选项为"正确"和"错误"
-4. 每道题目都要有详细解析
-5. 严格按照JSON格式返回，不要有额外内容
+额外要求：
+1. 为每道题目生成3个相关标签（如学科名称、知识点、题型特征等）
+2. 题目内容要准确、无歧义
+3. 解析要详细，包含解题思路
+4. 确保返回的是完整有效的JSON格式
 
-请开始生成题目：`;
+请开始生成题目，只返回JSON格式的内容：`;
   }
 
   static buildCompletePrompt(config: GenerationConfig): { systemPrompt: string; userPrompt: string } {
@@ -151,6 +166,9 @@ ${questionRequirements}
   }
 }
 
+/**
+ * AI响应解析 - 修复版本
+ */
 export class AIGenerationService {
   private config = AIConfigManager.getCurrentConfig();
   private abortController: AbortController | null = null;
@@ -172,37 +190,186 @@ export class AIGenerationService {
       temperature: this.config.temperature,
       max_tokens: 4000,
       stream: true,
+      // 强制JSON格式输出
       response_format: { type: 'json_object' }
     };
   }
 
   /**
-   * 解析流式响应（浏览器原生实现，兼容所有主流大模型SSE风格）
+   * 解析AI响应 - 修复格式问题
+   */
+  private parseAIResponse(content: string): any {
+    try {
+      console.log('原始AI响应内容:', content);
+      
+      // 清理响应内容
+      let cleanContent = content.trim();
+      
+      // 移除可能的markdown标记
+      cleanContent = cleanContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      
+      // 移除前后的解释文字
+      cleanContent = cleanContent.replace(/^[^{]*/, '').replace(/[^}]*$/, '');
+      
+      // 找到JSON开始和结束位置
+      const jsonStart = cleanContent.indexOf('{');
+      const jsonEnd = cleanContent.lastIndexOf('}') + 1;
+      
+      if (jsonStart === -1 || jsonEnd === 0) {
+        throw new Error('响应中未找到有效的JSON内容');
+      }
+      
+      const jsonContent = cleanContent.slice(jsonStart, jsonEnd);
+      console.log('提取的JSON内容:', jsonContent);
+      
+      const parsed = JSON.parse(jsonContent);
+      
+      if (!parsed.questions || !Array.isArray(parsed.questions)) {
+        throw new Error('AI响应格式错误：缺少questions数组');
+      }
+
+      // 处理和验证每个题目
+      const processedQuestions: Question[] = parsed.questions.map((q: any, index: number) => {
+        console.log(`处理题目 ${index + 1}:`, q);
+        
+        // 验证必要字段
+        if (!q.type || !q.content || !q.content.title) {
+          console.warn(`题目 ${index + 1} 缺少必要字段，跳过`);
+          return null;
+        }
+
+        // 处理选项格式
+        let processedOptions: any[] = [];
+        let processedCorrectAnswer: string | string[] = '';
+
+        if (q.type === 'single_choice' || q.type === 'multiple_choice') {
+          // 确保选项格式正确
+          if (q.options && Array.isArray(q.options)) {
+            processedOptions = q.options.map((opt: any, optIndex: number) => ({
+              id: String.fromCharCode(65 + optIndex), // A, B, C, D
+              text: typeof opt === 'string' ? opt : (opt.text || opt.content || `选项${optIndex + 1}`),
+              isCorrect: false // 先设为false，后面根据correctAnswer设置
+            }));
+          } else {
+            // 如果没有选项，创建默认选项
+            processedOptions = [
+              { id: 'A', text: '选项A', isCorrect: false },
+              { id: 'B', text: '选项B', isCorrect: false },
+              { id: 'C', text: '选项C', isCorrect: false },
+              { id: 'D', text: '选项D', isCorrect: false }
+            ];
+          }
+
+          // 处理正确答案
+          if (q.correctAnswer) {
+            if (q.type === 'single_choice') {
+              processedCorrectAnswer = typeof q.correctAnswer === 'string' ? q.correctAnswer : q.correctAnswer[0] || 'A';
+              // 设置正确选项
+              const correctIndex = processedOptions.findIndex(opt => opt.id === processedCorrectAnswer);
+              if (correctIndex !== -1) {
+                processedOptions[correctIndex].isCorrect = true;
+              }
+            } else {
+              processedCorrectAnswer = Array.isArray(q.correctAnswer) ? q.correctAnswer : [q.correctAnswer];
+              // 设置正确选项
+              (processedCorrectAnswer as string[]).forEach(answer => {
+                const correctIndex = processedOptions.findIndex(opt => opt.id === answer);
+                if (correctIndex !== -1) {
+                  processedOptions[correctIndex].isCorrect = true;
+                }
+              });
+            }
+          }
+        } else if (q.type === 'true_false') {
+          processedOptions = [
+            { id: 'true', text: '正确', isCorrect: false },
+            { id: 'false', text: '错误', isCorrect: false }
+          ];
+          processedCorrectAnswer = q.correctAnswer === 'true' || q.correctAnswer === true ? 'true' : 'false';
+          const correctIndex = processedOptions.findIndex(opt => opt.id === processedCorrectAnswer);
+          if (correctIndex !== -1) {
+            processedOptions[correctIndex].isCorrect = true;
+          }
+        } else if (q.type === 'short_answer') {
+          processedOptions = [];
+          processedCorrectAnswer = q.correctAnswer || '';
+        }
+
+        const processedQuestion: Question = {
+          id: q.id || `q_${Date.now()}_${index}`,
+          type: q.type as QuestionType,
+          difficulty: q.difficulty as Difficulty || Difficulty.MEDIUM,
+          content: {
+            title: q.content.title || q.content || '题目内容缺失',
+            format: 'markdown'
+          },
+          options: processedOptions,
+          correctAnswer: processedCorrectAnswer,
+          explanation: {
+            text: q.explanation?.text || q.explanation || '解析内容缺失',
+            format: 'markdown'
+          },
+          knowledgePoints: q.knowledgePoints || [],
+          tags: q.tags || ['通用题目'],
+          estimatedTime: q.estimatedTime || 120,
+          score: q.score || 5,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          creatorId: 'ai_generated'
+        };
+
+        console.log(`处理后的题目 ${index + 1}:`, processedQuestion);
+        return processedQuestion;
+      }).filter(Boolean); // 过滤掉null值
+
+      console.log('最终处理的题目列表:', processedQuestions);
+
+      return {
+        success: true,
+        metadata: {
+          totalQuestions: processedQuestions.length,
+          generationTime: parsed.metadata?.generationTime || 0,
+          model: this.config.model
+        },
+        questions: processedQuestions,
+        suggestions: parsed.suggestions || []
+      };
+    } catch (error) {
+      console.error('解析AI响应失败:', error);
+      console.error('原始内容:', content);
+      throw new Error(`解析AI响应失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  }
+
+  /**
+   * 解析流式响应
    */
   private async* parseStreamResponse(response: Response): AsyncGenerator<ProgressUpdate, void, unknown> {
     if (!response.body) throw new Error('响应体为空');
+    
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let currentStep = 0;
     let totalSteps = 10;
-
-    let contentString = ''; // 用于拼接所有 JSON content
+    let contentString = '';
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
+        
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim();
             if (!data || data === '[DONE]') continue;
+            
             try {
               const parsed = JSON.parse(data);
-              // 兼容 OpenAI/DeepSeek 两种流结构
               if (parsed.choices?.[0]?.delta?.content) {
                 contentString += parsed.choices[0].delta.content;
               } else if (parsed.choices?.[0]?.message?.content) {
@@ -211,40 +378,46 @@ export class AIGenerationService {
             } catch {}
           }
         }
-        // 可以在这里显示流式进度
+        
+        currentStep++;
         yield {
           type: 'progress',
           stage: '正在生成题目内容',
-          percentage: Math.min((currentStep / totalSteps) * 100, 95),
+          percentage: Math.min((currentStep / totalSteps) * 80, 80),
           currentStep,
           totalSteps,
-          message: `AI正在生成题目内容...`
+          message: 'AI正在生成题目内容...'
         };
       }
 
-      // 流结束，提取有效 JSON
-      const clean = contentString.trim();
-      let jsonStart = clean.indexOf('{');
-      let jsonEnd = clean.lastIndexOf('}') + 1;
-      if (jsonStart === -1 || jsonEnd === 0) throw new Error('未找到有效的 JSON');
-      const jsonContent = clean.slice(jsonStart, jsonEnd);
-      const parsed = JSON.parse(jsonContent);
+      // 解析完整的响应
+      yield {
+        type: 'progress',
+        stage: '解析AI响应',
+        percentage: 90,
+        currentStep: totalSteps - 1,
+        totalSteps,
+        message: '正在解析AI生成的题目...'
+      };
 
+      const result = this.parseAIResponse(contentString);
+      
       // 逐题推送
-      if (parsed.questions && Array.isArray(parsed.questions)) {
-        totalSteps = parsed.questions.length;
-        for (const question of parsed.questions) {
-          currentStep++;
-          // 推送给回调（UI可以直接订阅）
-          if (this.questionCallback) this.questionCallback(question);
+      if (result.questions && Array.isArray(result.questions)) {
+        for (let i = 0; i < result.questions.length; i++) {
+          const question = result.questions[i];
+          if (this.questionCallback) {
+            this.questionCallback(question);
+          }
+          
           yield {
             type: 'question',
             question,
-            stage: '已生成题目',
-            percentage: Math.min((currentStep / totalSteps) * 100, 100),
-            currentStep,
-            totalSteps,
-            message: `已生成题目 ${currentStep}`
+            stage: '题目生成完成',
+            percentage: 90 + (i + 1) / result.questions.length * 10,
+            currentStep: totalSteps - 1 + i,
+            totalSteps: totalSteps + result.questions.length,
+            message: `已生成第 ${i + 1} 道题目`
           };
         }
       }
@@ -253,72 +426,25 @@ export class AIGenerationService {
         type: 'completed',
         stage: '生成完成',
         percentage: 100,
-        currentStep: totalSteps,
-        totalSteps,
-        message: '所有题目生成完成'
+        currentStep: totalSteps + (result.questions?.length || 0),
+        totalSteps: totalSteps + (result.questions?.length || 0),
+        message: `成功生成 ${result.questions?.length || 0} 道题目`
       };
     } finally {
       reader.releaseLock();
     }
   }
 
-  // 注册 UI 实时题目回调
+  // 注册题目接收回调
   public onQuestionReceived(callback: (question: Question) => void) {
     this.questionCallback = callback;
   }
 
-  private parseAIResponse(content: string): AIResponse {
-    try {
-      const cleanContent = content.trim();
-      let jsonStart = cleanContent.indexOf('{');
-      let jsonEnd = cleanContent.lastIndexOf('}') + 1;
-      if (jsonStart === -1 || jsonEnd === 0) throw new Error('响应中未找到有效的JSON内容');
-      const jsonContent = cleanContent.slice(jsonStart, jsonEnd);
-      const parsed = JSON.parse(jsonContent);
-      if (!parsed.questions || !Array.isArray(parsed.questions)) throw new Error('AI响应格式错误：缺少questions数组');
-      const questions: Question[] = parsed.questions.map((q: any, index: number) => ({
-        id: q.id || `q_${Date.now()}_${index}`,
-        type: q.type || QuestionType.SINGLE_CHOICE,
-        difficulty: q.difficulty || Difficulty.MEDIUM,
-        content: {
-          title: q.content?.title || q.title || '题目内容缺失',
-          format: 'markdown'
-        },
-        options: q.options || [],
-        correctAnswer: q.correctAnswer || [],
-        explanation: {
-          text: q.explanation?.text || q.explanation || '解析内容缺失',
-          format: 'markdown'
-        },
-        knowledgePoints: q.knowledgePoints || [],
-        tags: q.tags || [],
-        estimatedTime: q.estimatedTime || 120,
-        score: q.score || 5,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        creatorId: 'ai_generated'
-      }));
-      return {
-        success: true,
-        metadata: {
-          totalQuestions: questions.length,
-          generationTime: parsed.metadata?.generationTime || 0,
-          model: this.config.model,
-          cost: parsed.metadata?.cost
-        },
-        questions,
-        suggestions: parsed.suggestions || []
-      };
-    } catch (error) {
-      console.error('解析AI响应失败:', error);
-      throw new Error(`解析AI响应失败: ${error instanceof Error ? error.message : '未知错误'}`);
-    }
-  }
-
-  async* generateQuestions(config: GenerationConfig): AsyncGenerator<ProgressUpdate, AIResponse, unknown> {
+  async* generateQuestions(config: GenerationConfig): AsyncGenerator<ProgressUpdate, any, unknown> {
     this.validateConfig();
     if (!config) throw new Error('生成配置不能为空');
     if (!config.questionTypes) throw new Error('题目类型配置缺失');
+    
     this.abortController = new AbortController();
 
     try {
@@ -335,14 +461,7 @@ export class AIGenerationService {
       const headers = AIConfigManager.getAuthHeaders(this.config);
       const url = AIConfigManager.buildApiUrl('/chat/completions', this.config);
 
-      yield {
-        type: 'progress',
-        stage: '发送生成请求',
-        percentage: 10,
-        currentStep: 2,
-        totalSteps: 10,
-        message: '正在发送题目生成请求...'
-      };
+      console.log('发送AI请求:', { url, requestData });
 
       const response = await fetch(url, {
         method: 'POST',
@@ -353,12 +472,8 @@ export class AIGenerationService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        let errorMessage = `API调用失败 (${response.status}): ${response.statusText}`;
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.error?.message || errorMessage;
-        } catch {}
-        throw new Error(errorMessage);
+        console.error('API调用失败:', { status: response.status, statusText: response.statusText, errorText });
+        throw new Error(`API调用失败 (${response.status}): ${response.statusText}`);
       }
 
       const startTime = Date.now();
@@ -367,40 +482,28 @@ export class AIGenerationService {
         if (update.type === 'completed') break;
       }
 
-      // 为保证完整性，仍然拉一次完整响应
+      // 获取完整响应确保数据完整性
       const finalResponse = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({ ...requestData, stream: false }),
         signal: this.abortController.signal
       });
-      if (!finalResponse.ok) throw new Error('获取完整响应失败');
-      const finalData = await finalResponse.json();
-      const fullContent = finalData.choices?.[0]?.message?.content || '';
 
-      yield {
-        type: 'progress',
-        stage: '解析生成结果',
-        percentage: 95,
-        currentStep: 9,
-        totalSteps: 10,
-        message: '正在解析AI生成的题目...'
-      };
-
-      const result = this.parseAIResponse(fullContent);
-      result.metadata!.generationTime = Date.now() - startTime;
-      yield {
-        type: 'completed',
-        stage: '生成完成',
-        percentage: 100,
-        currentStep: 10,
-        totalSteps: 10,
-        message: `成功生成${result.questions.length}道题目`
-      };
-      return result;
+      if (finalResponse.ok) {
+        const finalData = await finalResponse.json();
+        const fullContent = finalData.choices?.[0]?.message?.content || '';
+        console.log('完整AI响应:', fullContent);
+        
+        const result = this.parseAIResponse(fullContent);
+        result.metadata!.generationTime = Date.now() - startTime;
+        return result;
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '未知错误';
+      console.error('AI生成失败:', error);
+      
       yield {
         type: 'error',
         stage: '生成失败',
