@@ -2,6 +2,7 @@
 
 /**
  * 题目生成器组件统一导出
+ * 更新版本，包含增强的题目编辑器
  */
 
 export { GenerationModeSelector } from './GenerationModeSelector';
@@ -11,10 +12,16 @@ export { ImageUploadZone } from './ImageUploadZone';
 export { QuestionTypeConfig } from './QuestionTypeConfig';
 export { GenerationProgress } from './GenerationProgress';
 
-// ✅ 重要：导出简化版QuestionEditor（确保这个文件存在）
+// ✅ 导出新的增强版QuestionEditor（保持向后兼容）
 export { QuestionEditor } from './QuestionEditor';
 
-// 临时预览模式组件
+// 导出QuestionEditor文件夹中的子组件（供高级用户使用）
+export { DetailEditor } from './QuestionEditor/DetailEditor';
+export { OptionEditor } from './QuestionEditor/OptionEditor';
+export { SearchAndFilter } from './QuestionEditor/SearchAndFilter';
+export { TagManager } from './QuestionEditor/TagManager';
+
+// 临时预览模式组件（保持原有功能）
 export const PreviewMode = (props: any) => (
   <div style={{ 
     padding: '3rem', 
