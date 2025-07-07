@@ -1,6 +1,6 @@
 // frontend/src/pages/QuestionGenerator/components/QuestionEditor/DetailEditor.tsx
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -36,7 +36,6 @@ import { Question, QuestionType, Difficulty } from '@/types/question';
 import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS, COMMON_TAGS } from '@/types/editor';
 import { ContentEditor } from './SubComponents';
 import { OptionEditor } from './OptionEditor';
-import { TagManager } from './TagManager';
 
 /**
  * DetailEditor组件的Props接口
@@ -49,6 +48,146 @@ interface DetailEditorProps {
   disabled?: boolean;                             // 是否禁用编辑
   mode?: 'edit' | 'preview';                      // 编辑模式
 }
+
+/**
+ * 内联标签管理器组件
+ * 由于导入问题，我们在这里直接实现TagManager功能
+ */
+interface TagManagerProps {
+  tags: string[];
+  onAddTag: (tag: string) => void;
+  onRemoveTag: (tag: string) => void;
+  disabled?: boolean;
+  suggestedTags?: readonly string[];
+}
+
+const TagManager: React.FC<TagManagerProps> = ({
+  tags,
+  onAddTag,
+  onRemoveTag,
+  disabled = false,
+  suggestedTags = []
+}) => {
+  const [newTag, setNewTag] = useState('');
+
+  /**
+   * 添加标签
+   */
+  const handleAddTag = () => {
+    const trimmedTag = newTag.trim();
+    if (trimmedTag && !tags.includes(trimmedTag)) {
+      onAddTag(trimmedTag);
+      setNewTag('');
+    }
+  };
+
+  /**
+   * 处理输入框回车
+   */
+  const handleKeyPress = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleAddTag();
+    }
+  };
+
+  /**
+   * 从建议中添加标签
+   */
+  const handleSuggestedTagClick = (tag: string) => {
+    if (!tags.includes(tag)) {
+      onAddTag(tag);
+    }
+  };
+
+  /**
+   * 过滤建议标签（排除已有标签）
+   */
+  const availableSuggestions = suggestedTags.filter(tag => !tags.includes(tag));
+
+  return (
+    <Box>
+      {/* 现有标签显示 */}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          当前标签:
+        </Typography>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+          {tags.length > 0 ? (
+            tags.map((tag, index) => (
+              <Chip
+                key={index}
+                label={tag}
+                onDelete={disabled ? undefined : () => onRemoveTag(tag)}
+                color="primary"
+                variant="outlined"
+                size="small"
+              />
+            ))
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              暂无标签
+            </Typography>
+          )}
+        </Box>
+      </Box>
+
+      {/* 添加新标签 */}
+      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+        <TextField
+          size="small"
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          onKeyPress={handleKeyPress}
+          disabled={disabled}
+          placeholder="输入新标签..."
+          sx={{ flexGrow: 1 }}
+        />
+        <Button
+          variant="outlined"
+          startIcon={<Add />}
+          onClick={handleAddTag}
+          disabled={disabled || !newTag.trim() || tags.includes(newTag.trim())}
+          size="small"
+        >
+          添加
+        </Button>
+      </Box>
+
+      {/* 建议标签 */}
+      {availableSuggestions.length > 0 && (
+        <Box>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            建议标签:
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, maxHeight: 120, overflow: 'auto' }}>
+            {availableSuggestions.slice(0, 15).map((tag, index) => (
+              <Chip
+                key={index}
+                label={tag}
+                onClick={() => handleSuggestedTagClick(tag)}
+                disabled={disabled}
+                variant="outlined"
+                size="small"
+                sx={{ 
+                  cursor: disabled ? 'default' : 'pointer',
+                  '&:hover': disabled ? {} : {
+                    backgroundColor: 'action.hover'
+                  }
+                }}
+              />
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {/* 使用提示 */}
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+        标签有助于题目分类和搜索。建议添加学科、知识点、难度等相关标签。
+      </Typography>
+    </Box>
+  );
+};
 
 /**
  * 详细编辑器组件
@@ -65,7 +204,24 @@ export const DetailEditor: React.FC<DetailEditorProps> = ({
   // 本地编辑状态
   const [localChanges, setLocalChanges] = useState<Partial<Question>>({});
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<string[]>(['content', 'answer']);
+  
+  // ✅ 修复：默认展开更多区域，包括标签、知识点、高级设置
+  const [expandedSections, setExpandedSections] = useState<string[]>([
+    'content', 
+    'answer', 
+    'explanation',
+    'tags',      // ✅ 默认展开标签管理
+    'knowledge', // ✅ 默认展开知识点设置
+    'advanced'   // ✅ 默认展开高级设置
+  ]);
+
+  /**
+   * 重置本地更改当题目ID变化时
+   */
+  useEffect(() => {
+    setLocalChanges({});
+    setHasLocalChanges(false);
+  }, [question.id]);
 
   /**
    * 处理本地更改
@@ -384,7 +540,7 @@ export const DetailEditor: React.FC<DetailEditorProps> = ({
           </AccordionDetails>
         </Accordion>
 
-        {/* 标签管理 */}
+        {/* ✅ 修复：标签管理 - 确保默认展开 */}
         <Accordion 
           expanded={expandedSections.includes('tags')}
           onChange={() => toggleSection('tags')}
@@ -408,7 +564,7 @@ export const DetailEditor: React.FC<DetailEditorProps> = ({
           </AccordionDetails>
         </Accordion>
 
-        {/* 知识点设置 */}
+        {/* ✅ 修复：知识点设置 - 确保默认展开 */}
         <Accordion 
           expanded={expandedSections.includes('knowledge')}
           onChange={() => toggleSection('knowledge')}
@@ -435,7 +591,7 @@ export const DetailEditor: React.FC<DetailEditorProps> = ({
           </AccordionDetails>
         </Accordion>
 
-        {/* 高级设置 */}
+        {/* ✅ 修复：高级设置 - 确保默认展开 */}
         <Accordion 
           expanded={expandedSections.includes('advanced')}
           onChange={() => toggleSection('advanced')}

@@ -1,4 +1,4 @@
-// frontend/src/pages/QuestionGenerator/components/QuestionEditor.tsx (替换原版本)
+// frontend/src/pages/QuestionGenerator/components/QuestionEditor.tsx (修复版本)
 
 import React, { useState, useCallback, useEffect } from 'react';
 import {
@@ -65,6 +65,8 @@ import {
 } from '@mui/icons-material';
 
 import { Question, QuestionType, Difficulty } from '@/types/question';
+import { EditableQuestion } from '@/types/editor';
+import { DetailEditor } from './QuestionEditor/DetailEditor';
 
 /**
  * 题目编辑器的Props接口 (保持向后兼容)
@@ -157,10 +159,27 @@ const validateQuestion = (question: Question): { isValid: boolean; errors: strin
 };
 
 /**
+ * 转换为可编辑题目
+ */
+const convertToEditableQuestion = (question: Question): EditableQuestion => {
+  const validation = validateQuestion(question);
+  return {
+    ...question,
+    editState: {
+      isModified: false,
+      isValid: validation.isValid,
+      lastModified: new Date(),
+      validationErrors: validation.errors,
+      hasUnsavedChanges: false
+    }
+  };
+};
+
+/**
  * 题目列表组件
  */
 interface QuestionListProps {
-  questions: Question[];
+  questions: EditableQuestion[];
   selectedQuestionId: string | null;
   selectedQuestions: string[];
   onQuestionSelect: (id: string) => void;
@@ -212,7 +231,6 @@ const QuestionListComponent: React.FC<QuestionListProps> = ({
       <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
         {questions.map((question, index) => {
           const typeConfig = QUESTION_TYPE_CONFIG[question.type];
-          const validation = validateQuestion(question);
           const isSelected = selectedQuestionId === question.id;
           const isBulkSelected = selectedQuestions.includes(question.id);
 
@@ -256,10 +274,10 @@ const QuestionListComponent: React.FC<QuestionListProps> = ({
                         {question.content?.title && question.content.title.length > 50 && '...'}
                       </Typography>
                       
-                      {validation.isValid ? (
+                      {question.editState.isValid ? (
                         <CheckCircle color="success" fontSize="small" />
                       ) : (
-                        <Tooltip title={validation.errors.join(', ')}>
+                        <Tooltip title={question.editState.validationErrors.join(', ')}>
                           <ErrorIcon color="error" fontSize="small" />
                         </Tooltip>
                       )}
@@ -286,9 +304,9 @@ const QuestionListComponent: React.FC<QuestionListProps> = ({
                       />
                     </Box>
                     
-                    {!validation.isValid && (
+                    {!question.editState.isValid && (
                       <Typography variant="caption" color="error.main" sx={{ mt: 0.5, display: 'block' }}>
-                        {validation.errors[0]}
+                        {question.editState.validationErrors[0]}
                       </Typography>
                     )}
                   </Box>
@@ -310,284 +328,6 @@ const QuestionListComponent: React.FC<QuestionListProps> = ({
 };
 
 /**
- * 题目详细编辑器组件
- */
-interface DetailEditorProps {
-  question: Question | null;
-  onUpdate: (updates: Partial<Question>) => void;
-  disabled?: boolean;
-}
-
-const DetailEditorComponent: React.FC<DetailEditorProps> = ({
-  question,
-  onUpdate,
-  disabled
-}) => {
-  const [localChanges, setLocalChanges] = useState<Partial<Question>>({});
-  const [hasChanges, setHasChanges] = useState(false);
-
-  useEffect(() => {
-    setLocalChanges({});
-    setHasChanges(false);
-  }, [question?.id]);
-
-  const currentQuestion = question ? { ...question, ...localChanges } : null;
-
-  const handleChange = (field: string, value: any) => {
-    setLocalChanges(prev => ({ ...prev, [field]: value }));
-    setHasChanges(true);
-  };
-
-  const handleSave = () => {
-    if (hasChanges && question) {
-      onUpdate(localChanges);
-      setLocalChanges({});
-      setHasChanges(false);
-    }
-  };
-
-  const handleDiscard = () => {
-    setLocalChanges({});
-    setHasChanges(false);
-  };
-
-  if (!currentQuestion) {
-    return (
-      <Box sx={{ 
-        height: '100%', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        flexDirection: 'column',
-        gap: 2,
-        color: 'text.secondary'
-      }}>
-        <Typography variant="h6">请选择要编辑的题目</Typography>
-        <Typography variant="body2">从左侧列表中选择题目开始编辑</Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* 编辑器头部 */}
-      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h6" fontWeight="bold">题目编辑</Typography>
-          {hasChanges && (
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button size="small" variant="outlined" startIcon={<Undo />} onClick={handleDiscard}>
-                撤销
-              </Button>
-              <Button size="small" variant="contained" startIcon={<Save />} onClick={handleSave}>
-                保存
-              </Button>
-            </Box>
-          )}
-        </Box>
-
-        {/* 基础信息 */}
-        <Grid container spacing={2}>
-          <Grid item xs={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>题目类型</InputLabel>
-              <Select
-                value={currentQuestion.type}
-                label="题目类型"
-                onChange={(e) => handleChange('type', e.target.value)}
-                disabled={disabled}
-              >
-                {Object.entries(QUESTION_TYPE_CONFIG).map(([type, config]) => (
-                  <MenuItem key={type} value={type}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {config.icon}
-                      {config.label}
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>难度级别</InputLabel>
-              <Select
-                value={currentQuestion.difficulty}
-                label="难度级别"
-                onChange={(e) => handleChange('difficulty', e.target.value)}
-                disabled={disabled}
-              >
-                {Object.entries(DIFFICULTY_CONFIG).map(([difficulty, config]) => (
-                  <MenuItem key={difficulty} value={difficulty}>
-                    {config.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={4}>
-            <TextField
-              fullWidth
-              size="small"
-              label="分值"
-              type="number"
-              value={currentQuestion.score || 5}
-              onChange={(e) => handleChange('score', parseInt(e.target.value) || 5)}
-              disabled={disabled}
-            />
-          </Grid>
-        </Grid>
-      </Box>
-
-      {/* 编辑内容 */}
-      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-        {/* 题目内容 */}
-        <Accordion defaultExpanded>
-          <AccordionSummary expandIcon={<ExpandMore />}>
-            <Typography variant="subtitle1" fontWeight="medium">题目内容</Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <TextField
-              fullWidth
-              multiline
-              rows={4}
-              value={currentQuestion.content?.title || ''}
-              onChange={(e) => handleChange('content', { title: e.target.value, format: 'markdown' })}
-              disabled={disabled}
-              placeholder="请输入题目内容..."
-            />
-          </AccordionDetails>
-        </Accordion>
-
-        {/* 选项编辑（选择题） */}
-        {[QuestionType.SINGLE_CHOICE, QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE].includes(currentQuestion.type) && (
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMore />}>
-              <Typography variant="subtitle1" fontWeight="medium">选项设置</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              {currentQuestion.type === QuestionType.TRUE_FALSE ? (
-                <FormControl component="fieldset">
-                  <Typography variant="body2" gutterBottom>正确答案:</Typography>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={currentQuestion.correctAnswer === 'true'}
-                          onChange={(e) => handleChange('correctAnswer', e.target.checked ? 'true' : 'false')}
-                          disabled={disabled}
-                        />
-                      }
-                      label="正确"
-                    />
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={currentQuestion.correctAnswer === 'false'}
-                          onChange={(e) => handleChange('correctAnswer', e.target.checked ? 'false' : 'true')}
-                          disabled={disabled}
-                        />
-                      }
-                      label="错误"
-                    />
-                  </Box>
-                </FormControl>
-              ) : (
-                <Box>
-                  {currentQuestion.options?.map((option, index) => (
-                    <Box key={option.id || index} sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-                      <Checkbox
-                        checked={
-                          currentQuestion.type === QuestionType.SINGLE_CHOICE
-                            ? currentQuestion.correctAnswer === option.id
-                            : Array.isArray(currentQuestion.correctAnswer) && currentQuestion.correctAnswer.includes(option.id)
-                        }
-                        onChange={(e) => {
-                          if (currentQuestion.type === QuestionType.SINGLE_CHOICE) {
-                            handleChange('correctAnswer', e.target.checked ? option.id : '');
-                          } else {
-                            const current = Array.isArray(currentQuestion.correctAnswer) ? currentQuestion.correctAnswer : [];
-                            const newAnswer = e.target.checked 
-                              ? [...current, option.id]
-                              : current.filter(id => id !== option.id);
-                            handleChange('correctAnswer', newAnswer);
-                          }
-                        }}
-                        disabled={disabled}
-                      />
-                      <Typography variant="body2" sx={{ minWidth: 20 }}>{option.id}.</Typography>
-                      <TextField
-                        fullWidth
-                        size="small"
-                        value={option.text || ''}
-                        onChange={(e) => {
-                          const newOptions = [...(currentQuestion.options || [])];
-                          newOptions[index] = { ...option, text: e.target.value };
-                          handleChange('options', newOptions);
-                        }}
-                        disabled={disabled}
-                        placeholder={`选项 ${option.id}`}
-                      />
-                    </Box>
-                  ))}
-                </Box>
-              )}
-            </AccordionDetails>
-          </Accordion>
-        )}
-
-        {/* 参考答案（简答题） */}
-        {currentQuestion.type === QuestionType.SHORT_ANSWER && (
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMore />}>
-              <Typography variant="subtitle1" fontWeight="medium">参考答案</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <TextField
-                fullWidth
-                multiline
-                rows={3}
-                value={currentQuestion.correctAnswer || ''}
-                onChange={(e) => handleChange('correctAnswer', e.target.value)}
-                disabled={disabled}
-                placeholder="请输入参考答案..."
-              />
-            </AccordionDetails>
-          </Accordion>
-        )}
-
-        {/* 答案解析 */}
-        <Accordion>
-          <AccordionSummary expandIcon={<ExpandMore />}>
-            <Typography variant="subtitle1" fontWeight="medium">答案解析</Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <TextField
-              fullWidth
-              multiline
-              rows={4}
-              value={currentQuestion.explanation?.text || ''}
-              onChange={(e) => handleChange('explanation', { text: e.target.value, format: 'markdown' })}
-              disabled={disabled}
-              placeholder="请输入答案解析..."
-            />
-          </AccordionDetails>
-        </Accordion>
-      </Box>
-
-      {/* 底部状态栏 */}
-      {hasChanges && (
-        <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', backgroundColor: 'action.hover' }}>
-          <Typography variant="body2" color="warning.main">
-            有未保存的更改
-          </Typography>
-        </Box>
-      )}
-    </Box>
-  );
-};
-
-/**
  * 增强版题目编辑器主组件
  */
 export const QuestionEditor: React.FC<QuestionEditorProps> = ({
@@ -599,8 +339,11 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
   mode = 'edit',
   disabled = false
 }) => {
-  // 状态管理
-  const [questions, setQuestions] = useState<Question[]>(initialQuestions);
+  // ✅ 状态管理 - 转换为可编辑题目格式
+  const [questions, setQuestions] = useState<EditableQuestion[]>(() => 
+    initialQuestions.map(convertToEditableQuestion)
+  );
+  
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(
     externalSelectedId || (initialQuestions.length > 0 ? initialQuestions[0].id : null)
   );
@@ -609,20 +352,20 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // 同步外部题目数据
+  // ✅ 同步外部题目数据
   useEffect(() => {
-    setQuestions(initialQuestions);
+    setQuestions(initialQuestions.map(convertToEditableQuestion));
   }, [initialQuestions]);
 
-  // 统计信息
+  // ✅ 统计信息
   const statistics = {
     total: questions.length,
-    valid: questions.filter(q => validateQuestion(q).isValid).length,
-    invalid: questions.filter(q => !validateQuestion(q).isValid).length,
+    valid: questions.filter(q => q.editState.isValid).length,
+    invalid: questions.filter(q => !q.editState.isValid).length,
     selected: selectedQuestions.length
   };
 
-  // 处理题目选择
+  // ✅ 处理题目选择
   const handleQuestionSelect = useCallback((questionId: string) => {
     setSelectedQuestionId(questionId);
     if (onQuestionSelect) {
@@ -630,27 +373,64 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
     }
   }, [onQuestionSelect]);
 
-  // 处理题目更新
-  const handleQuestionUpdate = useCallback((updates: Partial<Question>) => {
-    if (!selectedQuestionId) return;
-
-    setQuestions(prev => prev.map(q => 
-      q.id === selectedQuestionId 
-        ? { ...q, ...updates, updatedAt: new Date() }
-        : q
-    ));
+  // ✅ 处理题目更新
+  const handleQuestionUpdate = useCallback((questionId: string, updates: Partial<Question>) => {
+    setQuestions(prev => prev.map(q => {
+      if (q.id === questionId) {
+        const updatedQuestion = { ...q, ...updates, updatedAt: new Date() };
+        const validation = validateQuestion(updatedQuestion);
+        
+        return {
+          ...updatedQuestion,
+          editState: {
+            ...q.editState,
+            isModified: true,
+            isValid: validation.isValid,
+            validationErrors: validation.errors,
+            lastModified: new Date(),
+            hasUnsavedChanges: true
+          }
+        };
+      }
+      return q;
+    }));
+    
     setHasUnsavedChanges(true);
 
-    // 触发外部回调
+    // ✅ 触发外部回调
     if (onQuestionEdit) {
-      const currentQuestion = questions.find(q => q.id === selectedQuestionId);
+      const currentQuestion = questions.find(q => q.id === questionId);
       if (currentQuestion) {
-        onQuestionEdit(selectedQuestionId, { ...currentQuestion, ...updates });
+        onQuestionEdit(questionId, { ...currentQuestion, ...updates });
       }
     }
-  }, [selectedQuestionId, onQuestionEdit, questions]);
+  }, [onQuestionEdit, questions]);
 
-  // 处理批量选择
+  // ✅ 处理标签添加
+  const handleAddTag = useCallback((questionId: string, tag: string) => {
+    const question = questions.find(q => q.id === questionId);
+    if (question) {
+      const currentTags = question.tags || [];
+      if (!currentTags.includes(tag)) {
+        handleQuestionUpdate(questionId, {
+          tags: [...currentTags, tag]
+        });
+      }
+    }
+  }, [questions, handleQuestionUpdate]);
+
+  // ✅ 处理标签删除
+  const handleRemoveTag = useCallback((questionId: string, tag: string) => {
+    const question = questions.find(q => q.id === questionId);
+    if (question) {
+      const currentTags = question.tags || [];
+      handleQuestionUpdate(questionId, {
+        tags: currentTags.filter(t => t !== tag)
+      });
+    }
+  }, [questions, handleQuestionUpdate]);
+
+  // ✅ 处理批量选择
   const handleBulkSelect = useCallback((questionIds: string[], selected: boolean) => {
     setSelectedQuestions(prev => {
       if (selected) {
@@ -661,7 +441,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
     });
   }, []);
 
-  // 处理全选
+  // ✅ 处理全选
   const handleSelectAll = useCallback(() => {
     if (selectedQuestions.length === questions.length) {
       setSelectedQuestions([]);
@@ -670,7 +450,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
     }
   }, [selectedQuestions.length, questions]);
 
-  // 获取当前选中的题目
+  // ✅ 获取当前选中的题目
   const currentQuestion = selectedQuestionId 
     ? questions.find(q => q.id === selectedQuestionId) || null
     : null;
@@ -757,13 +537,31 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
           />
         </Card>
 
-        {/* 右侧详细编辑器 */}
+        {/* ✅ 右侧详细编辑器 - 使用 DetailEditor 组件 */}
         <Card elevation={2} sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <DetailEditorComponent
-            question={currentQuestion}
-            onUpdate={handleQuestionUpdate}
-            disabled={disabled}
-          />
+          {currentQuestion ? (
+            <DetailEditor
+              question={currentQuestion}
+              onQuestionUpdate={handleQuestionUpdate}
+              onAddTag={handleAddTag}     // ✅ 传递标签添加回调
+              onRemoveTag={handleRemoveTag} // ✅ 传递标签删除回调
+              disabled={disabled}
+              mode={mode}
+            />
+          ) : (
+            <Box sx={{ 
+              flex: 1,
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              flexDirection: 'column',
+              gap: 2,
+              color: 'text.secondary'
+            }}>
+              <Typography variant="h6">请选择要编辑的题目</Typography>
+              <Typography variant="body2">从左侧列表中选择题目开始编辑</Typography>
+            </Box>
+          )}
         </Card>
       </Box>
 
@@ -791,7 +589,7 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
           <Button onClick={() => setShowSaveDialog(false)}>取消</Button>
           <Button 
             onClick={() => {
-              // 这里可以添加保存逻辑
+              // ✅ 这里可以添加保存逻辑
               console.log('保存题目:', selectedQuestions);
               setShowSaveDialog(false);
             }} 
