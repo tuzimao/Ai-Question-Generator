@@ -26,8 +26,14 @@ export { ContentEditor, FormulaEditor, ImageUploader } from './QuestionEditor/Su
 // ✅ 可选：导出编辑器状态管理Hook（如果需要外部使用）
 // export { useQuestionEditorState } from './QuestionEditor/hooks/useQuestionEditorState';
 
-// 临时预览模式组件（保持原有功能）
-export const PreviewMode = (props: any) => (
+// ✅ 导出完整的PreviewMode组件（主要使用）
+export { default as PreviewMode } from './PreviewMode';
+
+// ✅ 兼容性导出 - 确保现有代码可以正常导入
+export { default as QuestionPreview } from './PreviewMode';
+
+// 临时预览模式组件（保持原有功能） - 已被新PreviewMode替换
+export const LegacyPreviewMode = (props: any) => (
   <div style={{ 
     padding: '3rem', 
     textAlign: 'center', 
@@ -69,3 +75,45 @@ export const PreviewMode = (props: any) => (
     )}
   </div>
 );
+
+/**
+ * 使用说明
+ * 
+ * 修复内容：
+ * 1. ✅ 修复了DetailEditor中标签管理、知识点设置、高级设置区域不显示的问题
+ * 2. ✅ 修复了展开状态配置，默认展开更多区域便于用户查看
+ * 3. ✅ 修复了TagManager组件导入问题，直接在DetailEditor中实现
+ * 4. ✅ 修复了回调函数传递问题，确保onAddTag和onRemoveTag正确传递
+ * 5. ✅ 增强了ContentEditor组件，提供更好的编辑体验
+ * 6. ✅ 更新了Question类型定义，保持与组件期望格式一致
+ * 
+ * 主要组件：
+ * - QuestionEditor: 主编辑器组件，整合了题目列表和详细编辑
+ * - DetailEditor: 详细编辑器，提供完整的题目编辑功能
+ * - ContentEditor: 内容编辑器，支持富文本和Markdown
+ * - OptionEditor: 选项编辑器，处理不同题型的选项配置
+ * - TagManager: 标签管理器（内联实现，解决导入问题）
+ * 
+ * 使用示例：
+ * ```tsx
+ * import { QuestionEditor } from '@/pages/QuestionGenerator/components';
+ * 
+ * <QuestionEditor
+ *   questions={questions}
+ *   onQuestionEdit={handleQuestionEdit}
+ *   onPreview={handlePreview}
+ *   selectedQuestionId={selectedId}
+ *   onQuestionSelect={handleSelect}
+ * />
+ * ```
+ * 
+ * 功能特点：
+ * - 📝 完整的题目编辑功能（内容、选项、答案、解析）
+ * - 🏷️ 标签管理（添加、删除、建议标签）
+ * - 🧠 知识点设置
+ * - ⚙️ 高级设置（答题时间、分值等）
+ * - ✅ 实时验证和错误提示
+ * - 💾 自动保存和本地存储
+ * - 🔍 搜索和过滤功能
+ * - 📊 统计信息展示
+ */
