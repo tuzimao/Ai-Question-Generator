@@ -1,45 +1,53 @@
 {
-  "name": "backend",
+  "name": "ai-question-generator-backend",
   "version": "1.0.0",
-  "type": "module",
+  "description": "AI题目生成器后端服务",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "nodemon src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "lint": "eslint src/**/*.ts",
-    "test": "jest"
+    "migrate:latest": "knex migrate:latest",
+    "migrate:rollback": "knex migrate:rollback",
+    "migrate:make": "knex migrate:make",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src/**/*.ts"
   },
-  "keywords": ["ai", "quiz", "education"],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "ai",
+    "education",
+    "fastify",
+    "typescript"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "express-rate-limit": "^7.1.0",
-    "helmet": "^7.0.0",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.3.2",
-    "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1",
-    "openai": "^4.35.1",
-    "pdf-parse": "^1.1.1",
-    "redis": "^4.6.7",
-    "socket.io": "^4.7.5",
-    "mammoth": "^1.6.0"
+    "@fastify/cors": "^8.5.0",
+    "@fastify/jwt": "^7.2.4",
+    "@fastify/multipart": "^8.3.1",
+    "@fastify/rate-limit": "^9.1.0",
+    "bcrypt": "^5.1.1",
+    "dotenv": "^16.6.1",
+    "fastify": "^4.29.1",
+    "knex": "^3.1.0",
+    "mysql2": "^3.14.2",
+    "uuid": "^9.0.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.2",
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
-    "@types/jsonwebtoken": "^9.0.5",
-    "@types/multer": "^1.4.7",
-    "@types/node": "^20.11.30",
-    "nodemon": "^3.1.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "@types/bcrypt": "^5.0.2",
+    "@types/node": "^20.19.7",
+    "@types/uuid": "^9.0.8",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
