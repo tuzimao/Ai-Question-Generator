@@ -1,0 +1,63 @@
+{
+  "compilerOptions": {
+    /* 基础选项 */
+    "target": "ES2022",                          // 编译目标
+    "module": "commonjs",                        // 模块系统
+    "lib": ["ES2022"],                          // 包含的库
+    "outDir": "./dist",                         // 输出目录
+    "rootDir": "./src",                         // 源代码目录
+    
+    /* 模块解析选项 */
+    "moduleResolution": "node",                 // 模块解析策略
+    "baseUrl": "./",                            // 基础URL
+    "paths": {                                  // 路径映射
+      "@/*": ["src/*"],
+      "@/types/*": ["src/types/*"],
+      "@/config/*": ["src/config/*"],
+      "@/services/*": ["src/services/*"],
+      "@/controllers/*": ["src/controllers/*"],
+      "@/middleware/*": ["src/middleware/*"],
+      "@/models/*": ["src/models/*"],
+      "@/utils/*": ["src/utils/*"]
+    },
+    "resolveJsonModule": true,                  // 允许导入JSON模块
+    "allowSyntheticDefaultImports": true,       // 允许合成默认导入
+    "esModuleInterop": true,                    // ES模块互操作
+    
+    /* 严格类型检查选项 */
+    "strict": true,                             // 启用所有严格类型检查选项
+    "noImplicitAny": true,                      // 禁止隐式any类型
+    "strictNullChecks": true,                   // 严格的null检查
+    "strictFunctionTypes": true,                // 严格的函数类型
+    "noImplicitReturns": true,                  // 禁止隐式返回
+    "noImplicitThis": true,                     // 禁止隐式this
+    "noUnusedLocals": true,                     // 检查未使用的局部变量
+    "noUnusedParameters": true,                 // 检查未使用的参数
+    
+    /* 额外检查 */
+    "noUncheckedIndexedAccess": true,           // 禁止未检查的索引访问
+    "exactOptionalPropertyTypes": true,         // 精确的可选属性类型
+    
+    /* 其他选项 */
+    "skipLibCheck": true,                       // 跳过库文件的类型检查
+    "forceConsistentCasingInFileNames": true,   // 强制文件名大小写一致
+    "declaration": true,                        // 生成声明文件
+    "declarationMap": true,                     // 生成声明映射文件
+    "sourceMap": true,                          // 生成源映射文件
+    "removeComments": false,                    // 保留注释
+    "emitDecoratorMetadata": true,              // 发出装饰器元数据
+    "experimentalDecorators": true              // 启用实验性装饰器
+  },
+  "include": [
+    "src/**/*"                                  // 包含src目录下所有文件
+  ],
+  "exclude": [
+    "node_modules",                             // 排除node_modules
+    "dist",                                     // 排除编译输出目录
+    "**/*.test.ts",                            // 排除测试文件
+    "**/*.spec.ts"                             // 排除规范文件
+  ],
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]      // 支持路径映射
+  }
+}
