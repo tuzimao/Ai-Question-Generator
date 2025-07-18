@@ -1,0 +1,100 @@
+# docker-compose.yml
+# AI题目生成器 - 基础设施服务配置
+# 包含向量数据库、缓存、对象存储等核心服务
+
+version: '3.8'
+
+services:
+  # 向量数据库 - 用于存储和检索文档嵌入向量
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai-generator-qdrant
+    ports:
+      - "6333:6333"  # HTTP API端口
+      - "6334:6334"  # gRPC端口
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/collections"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis缓存 - 用于缓存检索结果和会话数据
+  redis:
+    image: redis:latest
+    container_name: ai-generator-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    command: >
+      redis-server 
+      --appendonly yes 
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+
+  # MinIO对象存储 - 用于存储上传的文档文件
+  minio:
+    image: minio/minio:latest
+    container_name: ai-generator-minio
+    ports:
+      - "9000:9000"  # API端口
+      - "9001:9001"  # 管理控制台端口
+    volumes:
+      - ./data/minio:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Nginx代理 - 可选，用于统一入口和负载均衡
+  nginx:
+    image: nginx:alpine
+    container_name: ai-generator-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - qdrant
+      - minio
+    restart: unless-stopped
+    profiles:
+      - production  # 只在生产环境启用
+
+# 网络配置
+networks:
+  default:
+    name: ai-generator-network
+    driver: bridge
+
+# 数据卷配置
+volumes:
+  qdrant_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
