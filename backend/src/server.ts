@@ -21,6 +21,7 @@ import ServerConfig from '@/config/server';
 import Database from '@/utils/database';
 import { vectorService } from '@/services/VectorService';
 import { aiService } from '@/services/AIService';
+import { storageService } from '@/services/StorageService';
 import { BaseResponse } from '@/types/base';
 
 /**
@@ -49,8 +50,8 @@ class App {
       // 初始化数据库
       await this.initializeDatabase();
       
-      // 初始化AI服务
-      await this.initializeAIServices();
+      // 初始化外部服务
+      await this.initializeServices();
       
       // 注册路由
       await this.registerRoutes();
@@ -157,11 +158,11 @@ class App {
   }
 
   /**
-   * 初始化AI服务
+   * 初始化AI和存储服务
    */
-  private async initializeAIServices(): Promise<void> {
+  private async initializeServices(): Promise<void> {
     try {
-      console.log('🤖 初始化AI服务...');
+      console.log('🔧 初始化外部服务...');
       
       // 初始化向量服务
       try {
@@ -170,6 +171,15 @@ class App {
       } catch (error) {
         console.warn('⚠️ Qdrant向量服务初始化失败:', error.message);
         console.warn('💡 请确保Qdrant容器正在运行: docker-compose up qdrant');
+      }
+
+      // 初始化存储服务
+      try {
+        await storageService.initialize();
+        console.log('✅ MinIO存储服务初始化完成');
+      } catch (error) {
+        console.warn('⚠️ MinIO存储服务初始化失败:', error.message);
+        console.warn('💡 请确保MinIO容器正在运行: docker-compose up minio');
       }
       
       // 验证AI服务
@@ -185,11 +195,11 @@ class App {
         console.warn('⚠️ OpenAI API初始化失败:', error.message);
       }
       
-      console.log('✅ AI服务初始化完成');
+      console.log('✅ 外部服务初始化完成');
     } catch (error) {
-      console.error('❌ AI服务初始化失败:', error);
-      // 不抛出错误，允许应用在没有AI服务的情况下启动
-      console.warn('💡 应用将在降级模式下运行（无AI功能）');
+      console.error('❌ 外部服务初始化失败:', error);
+      // 不抛出错误，允许应用在降级模式下运行
+      console.warn('💡 应用将在降级模式下运行（部分功能受限）');
     }
   }
 
@@ -207,6 +217,7 @@ class App {
       console.log('  - Database:', typeof Database);
       console.log('  - vectorService:', typeof vectorService);
       console.log('  - aiService:', typeof aiService);
+      console.log('  - storageService:', typeof storageService);
       
       if (typeof vectorService.healthCheck !== 'function') {
         console.error('❌ vectorService.healthCheck 不是函数');
@@ -215,13 +226,17 @@ class App {
       if (typeof aiService.healthCheck !== 'function') {
         console.error('❌ aiService.healthCheck 不是函数');
       }
+
+      if (typeof storageService.healthCheck !== 'function') {
+        console.error('❌ storageService.healthCheck 不是函数');
+      }
       // 增强版健康检查路由
       server.get('/health', async (request, reply) => {
         const startTime = Date.now();
         
         try {
           // 安全地检查各个服务的健康状态
-          let dbHealth, vectorHealth, aiHealth;
+          let dbHealth, vectorHealth, aiHealth, storageHealth;
           
           // 数据库健康检查
           try {
@@ -263,6 +278,23 @@ class App {
             };
           }
 
+          // 存储服务健康检查
+          try {
+            const storageHealthResult = await storageService.healthCheck();
+            storageHealth = {
+              healthy: storageHealthResult,
+              connected: storageService.isConnectedToMinio(),
+              error: null
+            };
+          } catch (error) {
+            console.error('存储服务健康检查异常:', error);
+            storageHealth = {
+              healthy: false,
+              connected: false,
+              error: error.message
+            };
+          }
+
           const dbInfo = await Database.getInfo();
           const responseTime = Date.now() - startTime;
           const memUsage = process.memoryUsage();
@@ -299,6 +331,12 @@ class App {
                   embedding: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
                   chat: process.env.OPENAI_MODEL || 'gpt-4'
                 }
+              },
+              storage: {
+                status: storageHealth.healthy ? 'healthy' : 'unhealthy',
+                message: storageHealth.healthy ? 'MinIO存储连接正常' : `MinIO存储连接失败: ${storageHealth.error || 'Unknown error'}`,
+                connected: storageHealth.connected,
+                endpoint: `${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || '9000'}`
               }
             }
           };
@@ -331,6 +369,7 @@ class App {
           // 执行更详细的健康检查
           let vectorInfo = null;
           let availableModels: string[] = [];
+          let storageStats = null;
 
           try {
             if (vectorService.isConnectedToQdrant()) {
@@ -346,6 +385,15 @@ class App {
           } catch (error) {
             console.warn('获取AI模型列表失败:', error.message);
             availableModels = [`Error: ${error.message}`];
+          }
+
+          try {
+            if (storageService.isConnectedToMinio()) {
+              storageStats = await storageService.getStorageStats();
+            }
+          } catch (error) {
+            console.warn('获取存储统计失败:', error.message);
+            storageStats = { error: error.message };
           }
           
           const detailedStatus = {
@@ -366,6 +414,14 @@ class App {
                   embedding: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
                   chat: process.env.OPENAI_MODEL || 'gpt-4'
                 }
+              },
+              storage: {
+                healthy: await storageService.healthCheck(),
+                connected: storageService.isConnectedToMinio(),
+                endpoint: `${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || '9000'}`,
+                useSSL: process.env.MINIO_USE_SSL === 'true',
+                stats: storageStats,
+                buckets: storageService.getDefaultBuckets()
               }
             },
             environment: {
@@ -396,7 +452,8 @@ class App {
           initialization: {
             database: Database.isConnectedToDatabase(),
             vector: vectorService.isConnectedToQdrant(),
-            ai: await aiService.validateApiKey()
+            ai: await aiService.validateApiKey(),
+            storage: storageService.isConnectedToMinio()
           }
         };
 
@@ -437,8 +494,8 @@ class App {
               database: 'MySQL + Knex ORM',
               vector: 'Qdrant Vector Database',
               ai: 'OpenAI GPT-4 + Embeddings',
-              cache: 'Redis (计划中)',
-              storage: 'MinIO Object Storage (计划中)'
+              storage: 'MinIO Object Storage',
+              cache: 'Redis (计划中)'
             }
           },
           timestamp: new Date().toISOString()
@@ -525,13 +582,14 @@ class App {
       // 停止接受新请求并关闭服务器
       await this.serverConfig.stop();
 
-      // 关闭AI服务
+      // 关闭外部服务
       try {
         await vectorService.close();
         aiService.cleanup();
-        console.log('✅ AI服务已关闭');
+        await storageService.close();
+        console.log('✅ 外部服务已关闭');
       } catch (error) {
-        console.warn('⚠️ AI服务关闭时出现警告:', error.message);
+        console.warn('⚠️ 外部服务关闭时出现警告:', error.message);
       }
 
       // 关闭数据库连接
