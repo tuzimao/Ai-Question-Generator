@@ -63,42 +63,63 @@ export interface TokenUsage {
  * 封装OpenAI API调用，提供嵌入生成、聊天完成、Token计数等功能
  */
 export class AIService {
-  private openai: OpenAI;
-  private encoder: any;
+  private openai: OpenAI | null = null;
+  private encoder: any = null;
   private readonly defaultEmbeddingModel: string;
   private readonly defaultChatModel: string;
   private readonly maxRetries: number;
+  private isInitialized: boolean = false;
+  private initializationError: string | null = null;
 
   constructor() {
-    // 验证API密钥
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY环境变量未设置');
-    }
-
-    // 初始化OpenAI客户端
-    this.openai = new OpenAI({
-      apiKey,
-      maxRetries: 3,
-      timeout: 60000 // 60秒超时
-    });
-
-    // 配置默认模型
+    // 延迟初始化，不在构造函数中验证API密钥
     this.defaultEmbeddingModel = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
     this.defaultChatModel = process.env.OPENAI_MODEL || 'gpt-4';
     this.maxRetries = 3;
 
-    // 初始化Token编码器
-    try {
-      this.encoder = encoding_for_model(this.defaultEmbeddingModel as TiktokenModel);
-    } catch (error) {
-      console.warn('无法为嵌入模型创建编码器，使用默认编码器');
-      this.encoder = encoding_for_model('gpt-4');
+    console.log(`🤖 AI服务构造完成（延迟初始化）`);
+  }
+
+  /**
+   * 初始化 AI 服务
+   * 在实际使用前调用
+   */
+  private async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      return;
     }
 
-    console.log(`🤖 AI服务初始化完成`);
-    console.log(`   嵌入模型: ${this.defaultEmbeddingModel}`);
-    console.log(`   聊天模型: ${this.defaultChatModel}`);
+    try {
+      // 验证API密钥
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey || apiKey.trim() === '') {
+        throw new Error('OPENAI_API_KEY环境变量未设置或为空');
+      }
+
+      // 初始化OpenAI客户端
+      this.openai = new OpenAI({
+        apiKey,
+        maxRetries: 3,
+        timeout: 60000 // 60秒超时
+      });
+
+      // 初始化Token编码器
+      try {
+        this.encoder = encoding_for_model(this.defaultEmbeddingModel as TiktokenModel);
+      } catch (error) {
+        console.warn('无法为嵌入模型创建编码器，使用默认编码器');
+        this.encoder = encoding_for_model('gpt-4');
+      }
+
+      this.isInitialized = true;
+      console.log(`🤖 AI服务初始化完成`);
+      console.log(`   嵌入模型: ${this.defaultEmbeddingModel}`);
+      console.log(`   聊天模型: ${this.defaultChatModel}`);
+    } catch (error) {
+      this.initializationError = error.message;
+      console.error('AI服务初始化失败:', error.message);
+      throw error;
+    }
   }
 
   /**
@@ -107,10 +128,26 @@ export class AIService {
    */
   public async healthCheck(): Promise<boolean> {
     try {
+      // 如果有初始化错误，返回 false
+      if (this.initializationError) {
+        console.warn('AI服务初始化失败，健康检查返回false:', this.initializationError);
+        return false;
+      }
+
+      // 尝试初始化（如果还没有初始化）
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      // 检查OpenAI客户端是否可用
+      if (!this.openai) {
+        return false;
+      }
+
       await this.openai.models.list();
       return true;
     } catch (error) {
-      console.error('OpenAI健康检查失败:', error);
+      console.error('OpenAI健康检查失败:', error.message);
       return false;
     }
   }
@@ -121,6 +158,15 @@ export class AIService {
    * @returns 嵌入向量和元数据
    */
   public async createEmbedding(request: EmbeddingRequest): Promise<EmbeddingResponse> {
+    // 确保服务已初始化
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    if (!this.openai) {
+      throw new Error('OpenAI客户端未初始化');
+    }
+
     const model = request.model || this.defaultEmbeddingModel;
     
     try {
@@ -214,6 +260,15 @@ export class AIService {
    * @returns 聊天响应
    */
   public async createChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    // 确保服务已初始化
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    if (!this.openai) {
+      throw new Error('OpenAI客户端未初始化');
+    }
+
     const model = request.model || this.defaultChatModel;
     const maxTokens = request.maxTokens || parseInt(process.env.OPENAI_MAX_TOKENS || '2000', 10);
     
@@ -310,6 +365,12 @@ export class AIService {
         return 0;
       }
 
+      // 如果encoder还没初始化，使用粗略估算
+      if (!this.encoder) {
+        const avgCharsPerToken = /[\u4e00-\u9fff]/.test(text) ? 1.5 : 4;
+        return Math.ceil(text.length / avgCharsPerToken);
+      }
+
       // 如果指定了不同的模型，尝试使用对应的编码器
       if (model && model !== this.defaultEmbeddingModel) {
         try {
@@ -384,6 +445,15 @@ export class AIService {
    */
   public async getAvailableModels(): Promise<string[]> {
     try {
+      // 确保服务已初始化
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      if (!this.openai) {
+        throw new Error('OpenAI客户端未初始化');
+      }
+
       const response = await this.openai.models.list();
       return response.data.map(model => model.id).sort();
     } catch (error) {
@@ -398,6 +468,21 @@ export class AIService {
    */
   public async validateApiKey(): Promise<boolean> {
     try {
+      // 检查环境变量
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey || apiKey.trim() === '') {
+        return false;
+      }
+
+      // 确保服务已初始化
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      if (!this.openai) {
+        return false;
+      }
+
       await this.openai.models.list();
       return true;
     } catch (error) {
@@ -421,8 +506,21 @@ export class AIService {
   }
 }
 
-// 导出单例实例
-export const aiService = new AIService();
+/**
+ * 创建AI服务单例实例
+ * 使用延迟初始化模式，确保安全创建
+ */
+let aiServiceInstance: AIService | null = null;
 
-// 默认导出
+export function getAIService(): AIService {
+  if (!aiServiceInstance) {
+    aiServiceInstance = new AIService();
+  }
+  return aiServiceInstance;
+}
+
+// 导出单例实例
+export const aiService = getAIService();
+
+// 默认导出类
 export default AIService;

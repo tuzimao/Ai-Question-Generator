@@ -36,23 +36,29 @@ export interface CollectionConfig {
  * 负责管理Qdrant向量数据库的连接和操作
  */
 export class VectorService {
-  private client: QdrantClient;
+  private client: QdrantClient | null = null;
   private readonly defaultCollection: string;
   private isConnected: boolean = false;
+  private initializationError: string | null = null;
 
   constructor() {
-    const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333';
-    const apiKey = process.env.QDRANT_API_KEY;
+    try {
+      const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333';
+      const apiKey = process.env.QDRANT_API_KEY;
 
-    // 初始化Qdrant客户端
-    this.client = new QdrantClient({
-      url: qdrantUrl,
-      apiKey: apiKey || undefined
-    });
+      // 初始化Qdrant客户端
+      this.client = new QdrantClient({
+        url: qdrantUrl,
+        apiKey: apiKey || undefined
+      });
 
-    this.defaultCollection = process.env.QDRANT_COLLECTION_NAME || 'documents';
-    
-    console.log(`🔗 Qdrant向量服务初始化: ${qdrantUrl}`);
+      this.defaultCollection = process.env.QDRANT_COLLECTION_NAME || 'documents';
+      
+      console.log(`🔗 Qdrant向量服务初始化: ${qdrantUrl}`);
+    } catch (error) {
+      this.initializationError = error.message;
+      console.error('❌ Qdrant向量服务构造函数失败:', error);
+    }
   }
 
   /**
@@ -61,8 +67,20 @@ export class VectorService {
    */
   public async initialize(): Promise<void> {
     try {
+      // 检查初始化状态
+      if (this.initializationError) {
+        throw new Error(`Qdrant服务初始化失败: ${this.initializationError}`);
+      }
+
+      if (!this.client) {
+        throw new Error('Qdrant客户端未正确初始化');
+      }
+
       // 测试连接
-      await this.healthCheck();
+      const isHealthy = await this.healthCheck();
+      if (!isHealthy) {
+        throw new Error('Qdrant健康检查失败');
+      }
       
       // 确保默认集合存在
       await this.ensureCollection({
@@ -86,10 +104,23 @@ export class VectorService {
    */
   public async healthCheck(): Promise<boolean> {
     try {
+      // 检查初始化错误
+      if (this.initializationError) {
+        console.error('Qdrant服务初始化失败:', this.initializationError);
+        return false;
+      }
+
+      // 检查客户端是否存在
+      if (!this.client) {
+        console.error('Qdrant客户端未初始化');
+        return false;
+      }
+
+      // 尝试连接
       await this.client.getCollections();
       return true;
     } catch (error) {
-      console.error('Qdrant健康检查失败:', error);
+      console.error('Qdrant健康检查失败:', error.message || error);
       return false;
     }
   }
@@ -108,6 +139,10 @@ export class VectorService {
    */
   public async ensureCollection(config: CollectionConfig): Promise<void> {
     try {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
+
       // 检查集合是否存在
       const collections = await this.client.getCollections();
       const exists = collections.collections.some(col => col.name === config.name);
@@ -130,6 +165,10 @@ export class VectorService {
    */
   public async createCollection(config: CollectionConfig): Promise<void> {
     try {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
+
       await this.client.createCollection(config.name, {
         vectors: {
           size: config.vectorSize,
@@ -403,8 +442,21 @@ export class VectorService {
   }
 }
 
-// 导出单例实例
-export const vectorService = new VectorService();
+/**
+ * 创建向量服务单例实例
+ * 使用延迟初始化模式，确保安全创建
+ */
+let vectorServiceInstance: VectorService | null = null;
 
-// 默认导出
+export function getVectorService(): VectorService {
+  if (!vectorServiceInstance) {
+    vectorServiceInstance = new VectorService();
+  }
+  return vectorServiceInstance;
+}
+
+// 导出单例实例
+export const vectorService = getVectorService();
+
+// 默认导出类
 export default VectorService;

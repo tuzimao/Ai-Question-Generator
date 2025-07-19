@@ -1,4 +1,4 @@
-// src/server.ts (修复版本)
+// src/server.ts
 
 // ⚠️ 重要：必须在所有其他导入之前加载环境变量
 import dotenv from 'dotenv';
@@ -14,10 +14,13 @@ console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_NAME:', process.env.DB_NAME);
 console.log('DB_USER:', process.env.DB_USER);
 console.log('JWT_SECRET length:', process.env.JWT_SECRET?.length || 0);
+console.log('OPENAI_API_KEY length:', process.env.OPENAI_API_KEY?.length || 0);
 
 // 现在导入其他模块
 import ServerConfig from '@/config/server';
 import Database from '@/utils/database';
+import { vectorService } from '@/services/VectorService';
+import { aiService } from '@/services/AIService';
 import { BaseResponse } from '@/types/base';
 
 /**
@@ -46,6 +49,9 @@ class App {
       // 初始化数据库
       await this.initializeDatabase();
       
+      // 初始化AI服务
+      await this.initializeAIServices();
+      
       // 注册路由
       await this.registerRoutes();
       
@@ -59,6 +65,11 @@ class App {
       console.log(`📍 API服务地址: http://${host}:${port}`);
       console.log(`🌐 前端地址: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
       console.log(`📊 数据库: ${process.env.DB_NAME}@${process.env.DB_HOST}:${process.env.DB_PORT}`);
+      console.log(`🔍 向量数据库: ${process.env.QDRANT_URL || 'http://localhost:6333'}`);
+      
+      // 显示健康检查地址
+      console.log(`🏥 健康检查: http://${host}:${port}/health`);
+      console.log(`🔬 详细状态: http://${host}:${port}/health/detailed`);
       
       // 显示API文档地址（如果启用）
       if (process.env.API_DOCS_ENABLED === 'true') {
@@ -82,6 +93,13 @@ class App {
       'JWT_SECRET'
     ];
 
+    // AI服务相关的环境变量（警告级别）
+    const recommendedEnvVars = [
+      'OPENAI_API_KEY',
+      'QDRANT_URL'
+    ];
+
+    // 检查必需的环境变量
     const missingVars = requiredEnvVars.filter(varName => {
       const value = process.env[varName];
       return !value || value.trim() === '';
@@ -98,6 +116,20 @@ class App {
       console.error('3. 确保 .env 文件在 backend 目录下');
       console.error('4. 重新启动开发服务器');
       process.exit(1);
+    }
+
+    // 检查推荐的环境变量
+    const missingRecommended = recommendedEnvVars.filter(varName => {
+      const value = process.env[varName];
+      return !value || value.trim() === '';
+    });
+
+    if (missingRecommended.length > 0) {
+      console.warn('⚠️ 缺少推荐的环境变量（AI功能可能受限）:');
+      missingRecommended.forEach(varName => {
+        console.warn(`   - ${varName}: ${process.env[varName] || '未设置'}`);
+      });
+      console.warn('💡 建议配置这些变量以启用完整功能');
     }
 
     console.log('✅ 环境变量验证通过');
@@ -125,32 +157,256 @@ class App {
   }
 
   /**
+   * 初始化AI服务
+   */
+  private async initializeAIServices(): Promise<void> {
+    try {
+      console.log('🤖 初始化AI服务...');
+      
+      // 初始化向量服务
+      try {
+        await vectorService.initialize();
+        console.log('✅ Qdrant向量服务初始化完成');
+      } catch (error) {
+        console.warn('⚠️ Qdrant向量服务初始化失败:', error.message);
+        console.warn('💡 请确保Qdrant容器正在运行: docker-compose up qdrant');
+      }
+      
+      // 验证AI服务
+      try {
+        const aiHealthy = await aiService.healthCheck();
+        if (!aiHealthy) {
+          console.warn('⚠️ OpenAI API连接失败，请检查API密钥');
+          console.warn('💡 AI问答功能将不可用，但其他功能正常');
+        } else {
+          console.log('✅ OpenAI API连接正常');
+        }
+      } catch (error) {
+        console.warn('⚠️ OpenAI API初始化失败:', error.message);
+      }
+      
+      console.log('✅ AI服务初始化完成');
+    } catch (error) {
+      console.error('❌ AI服务初始化失败:', error);
+      // 不抛出错误，允许应用在没有AI服务的情况下启动
+      console.warn('💡 应用将在降级模式下运行（无AI功能）');
+    }
+  }
+
+  /**
    * 注册路由
    */
   private async registerRoutes(): Promise<void> {
     const server = this.serverConfig.getServer();
 
     try {
-      // 健康检查路由
+      console.log('🔄 开始注册路由...');
+      
+      // 验证服务导入
+      console.log('🔍 验证服务导入状态:');
+      console.log('  - Database:', typeof Database);
+      console.log('  - vectorService:', typeof vectorService);
+      console.log('  - aiService:', typeof aiService);
+      
+      if (typeof vectorService.healthCheck !== 'function') {
+        console.error('❌ vectorService.healthCheck 不是函数');
+      }
+      
+      if (typeof aiService.healthCheck !== 'function') {
+        console.error('❌ aiService.healthCheck 不是函数');
+      }
+      // 增强版健康检查路由
       server.get('/health', async (request, reply) => {
-        const dbHealth = await Database.healthCheck();
-        const dbInfo = await Database.getInfo();
+        const startTime = Date.now();
         
-        const healthStatus = {
-          status: 'ok',
+        try {
+          // 安全地检查各个服务的健康状态
+          let dbHealth, vectorHealth, aiHealth;
+          
+          // 数据库健康检查
+          try {
+            dbHealth = await Database.healthCheck();
+          } catch (error) {
+            console.error('数据库健康检查异常:', error);
+            dbHealth = { status: 'unhealthy', message: `数据库检查失败: ${error.message}` };
+          }
+
+          // 向量服务健康检查
+          try {
+            const vectorHealthResult = await vectorService.healthCheck();
+            vectorHealth = {
+              healthy: vectorHealthResult,
+              connected: vectorService.isConnectedToQdrant(),
+              error: null
+            };
+          } catch (error) {
+            console.error('向量服务健康检查异常:', error);
+            vectorHealth = {
+              healthy: false,
+              connected: false,
+              error: error.message
+            };
+          }
+
+          // AI服务健康检查
+          try {
+            const aiHealthResult = await aiService.healthCheck();
+            aiHealth = {
+              healthy: aiHealthResult,
+              error: null
+            };
+          } catch (error) {
+            console.error('AI服务健康检查异常:', error);
+            aiHealth = {
+              healthy: false,
+              error: error.message
+            };
+          }
+
+          const dbInfo = await Database.getInfo();
+          const responseTime = Date.now() - startTime;
+          const memUsage = process.memoryUsage();
+
+          // 构建健康状态响应
+          const healthStatus = {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            version: process.env.npm_package_version || '1.0.0',
+            environment: process.env.NODE_ENV || 'development',
+            uptime: Math.floor(process.uptime()),
+            responseTime: `${responseTime}ms`,
+            memory: {
+              used: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB',
+              total: Math.round(memUsage.heapTotal / 1024 / 1024) + 'MB',
+              rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB'
+            },
+            services: {
+              database: {
+                status: dbHealth.status === 'healthy' ? 'healthy' : 'unhealthy',
+                message: dbHealth.message || 'Unknown status',
+                info: dbInfo
+              },
+              vector: {
+                status: vectorHealth.healthy ? 'healthy' : 'unhealthy',
+                message: vectorHealth.healthy ? 'Qdrant连接正常' : `Qdrant连接失败: ${vectorHealth.error || 'Unknown error'}`,
+                connected: vectorHealth.connected,
+                url: process.env.QDRANT_URL || 'http://localhost:6333'
+              },
+              ai: {
+                status: aiHealth.healthy ? 'healthy' : 'unhealthy',
+                message: aiHealth.healthy ? 'OpenAI API连接正常' : `OpenAI API连接失败: ${aiHealth.error || 'Unknown error'}`,
+                models: {
+                  embedding: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
+                  chat: process.env.OPENAI_MODEL || 'gpt-4'
+                }
+              }
+            }
+          };
+
+          // 确定整体健康状态
+          const allServicesHealthy = Object.values(healthStatus.services)
+            .every(service => service.status === 'healthy');
+          
+          healthStatus.status = allServicesHealthy ? 'healthy' : 'degraded';
+          
+          const statusCode = allServicesHealthy ? 200 : 503;
+          reply.status(statusCode).send(healthStatus);
+          
+        } catch (error) {
+          console.error('健康检查路由异常:', error);
+          reply.status(500).send({
+            success: false,
+            error: '健康检查失败',
+            message: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
+      // 详细服务状态检查路由
+      server.get('/health/detailed', async (request, reply) => {
+        try {
+          console.log('开始详细健康检查...');
+          
+          // 执行更详细的健康检查
+          let vectorInfo = null;
+          let availableModels: string[] = [];
+
+          try {
+            if (vectorService.isConnectedToQdrant()) {
+              vectorInfo = await vectorService.getCollectionInfo();
+            }
+          } catch (error) {
+            console.warn('获取向量集合信息失败:', error.message);
+            vectorInfo = { error: error.message };
+          }
+
+          try {
+            availableModels = await aiService.getAvailableModels();
+          } catch (error) {
+            console.warn('获取AI模型列表失败:', error.message);
+            availableModels = [`Error: ${error.message}`];
+          }
+          
+          const detailedStatus = {
+            timestamp: new Date().toISOString(),
+            services: {
+              database: await Database.healthCheck(),
+              vector: {
+                healthy: await vectorService.healthCheck(),
+                connected: vectorService.isConnectedToQdrant(),
+                collection: vectorInfo,
+                url: process.env.QDRANT_URL || 'http://localhost:6333'
+              },
+              ai: {
+                healthy: await aiService.healthCheck(),
+                apiKeyValid: await aiService.validateApiKey(),
+                availableModels: availableModels.slice(0, 10), // 只显示前10个模型
+                defaultModels: {
+                  embedding: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
+                  chat: process.env.OPENAI_MODEL || 'gpt-4'
+                }
+              }
+            },
+            environment: {
+              nodeVersion: process.version,
+              platform: process.platform,
+              arch: process.arch,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            }
+          };
+
+          console.log('详细健康检查完成');
+          reply.send(detailedStatus);
+        } catch (error) {
+          console.error('详细健康检查失败:', error);
+          reply.status(500).send({
+            success: false,
+            error: '详细健康检查失败',
+            message: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+
+      // 服务初始化状态检查
+      server.get('/health/init', async (request, reply) => {
+        const initStatus = {
           timestamp: new Date().toISOString(),
-          version: process.env.npm_package_version || '1.0.0',
-          environment: process.env.NODE_ENV || 'development',
-          uptime: process.uptime(),
-          memory: process.memoryUsage(),
-          database: {
-            ...dbHealth,
-            info: dbInfo
+          initialization: {
+            database: Database.isConnectedToDatabase(),
+            vector: vectorService.isConnectedToQdrant(),
+            ai: await aiService.validateApiKey()
           }
         };
 
-        const statusCode = dbHealth.status === 'healthy' ? 200 : 503;
-        reply.status(statusCode).send(healthStatus);
+        const allInitialized = Object.values(initStatus.initialization).every(Boolean);
+        
+        reply.status(allInitialized ? 200 : 503).send({
+          ...initStatus,
+          ready: allInitialized,
+          message: allInitialized ? '所有服务已就绪' : '部分服务未就绪'
+        });
       });
 
       // API信息路由
@@ -165,15 +421,24 @@ class App {
             environment: process.env.NODE_ENV || 'development',
             features: [
               '用户认证与授权',
-              '题目智能生成',
-              '知识库管理',
-              '文件上传处理',
+              '文档向量化存储',
+              'AI知识问答',
+              '智能题目生成',
               'RESTful API接口'
             ],
             endpoints: {
               health: '/health',
+              health_detailed: '/health/detailed',
+              health_init: '/health/init',
               api_info: '/api/info',
               docs: process.env.API_DOCS_ENABLED === 'true' ? '/docs' : null
+            },
+            services: {
+              database: 'MySQL + Knex ORM',
+              vector: 'Qdrant Vector Database',
+              ai: 'OpenAI GPT-4 + Embeddings',
+              cache: 'Redis (计划中)',
+              storage: 'MinIO Object Storage (计划中)'
             }
           },
           timestamp: new Date().toISOString()
@@ -195,7 +460,7 @@ class App {
         reply.status(404).send(response);
       });
 
-      console.log('✅ 基础路由注册完成');
+      console.log('✅ 路由注册完成（包含AI服务集成）');
       
     } catch (error) {
       console.error('❌ 路由注册失败:', error);
@@ -259,6 +524,15 @@ class App {
 
       // 停止接受新请求并关闭服务器
       await this.serverConfig.stop();
+
+      // 关闭AI服务
+      try {
+        await vectorService.close();
+        aiService.cleanup();
+        console.log('✅ AI服务已关闭');
+      } catch (error) {
+        console.warn('⚠️ AI服务关闭时出现警告:', error.message);
+      }
 
       // 关闭数据库连接
       await Database.close();
