@@ -8,17 +8,21 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "migrate:latest": "knex migrate:latest",
-    "migrate:rollback": "knex migrate:rollback",
-    "migrate:make": "knex migrate:make",
-    "migrate:status": "knex migrate:status",
-    "migrate:run": "npm run build && knex migrate:latest",
-    "migrate:check": "knex migrate:status",
-    "migrate:down": "knex migrate:rollback",
-    "migrate:simple": "node scripts/simple-migrate.js",
-    "migrate:fix": "npm run build && node scripts/fix-migration-state.js",
-    "migrate:reset": "npm run build && node scripts/fix-migration-state.js reset",
-    "migrate:state": "npm run build && node scripts/fix-migration-state.js check",
+
+    "migrate:latest": "knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
+    "migrate:make": "knex migrate:make --knexfile knexfile.ts",
+    "migrate:status": "knex migrate:status --knexfile knexfile.ts",
+    "migrate:run": "npm run build && knex migrate:latest --knexfile knexfile.ts",
+    "migrate:check": "knex migrate:status --knexfile knexfile.ts",
+    "migrate:down": "knex migrate:rollback --knexfile knexfile.ts",
+
+
+    "migrate:latest:ts": "ts-node -O '{\"module\":\"CommonJS\"}' ./node_modules/.bin/knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback:ts": "ts-node -O '{\"module\":\"CommonJS\"}' ./node_modules/.bin/knex migrate:rollback --knexfile knexfile.ts",
+
+    "postbuild": "rm -f dist/migrations/*.d.ts",
+
     "test": "jest",
     "test:services": "node scripts/test-services.js",
     "test:db": "npm run build && node scripts/test-database-tables.js",
