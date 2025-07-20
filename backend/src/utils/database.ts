@@ -79,7 +79,10 @@ export class Database {
       console.log('✅ 数据库连接测试成功');
     } catch (error) {
       console.error('❌ 数据库连接测试失败:', error);
-      throw new Error(`数据库连接失败: ${error.message}`);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error
+        ? (error as { message: string }).message
+        : String(error);
+      throw new Error(`数据库连接失败: ${errorMessage}`);
     }
   }
 
@@ -91,13 +94,13 @@ export class Database {
     try {
       console.log('🔄 检查数据库迁移...');
       
-      const [batch, log] = await db.migrate.latest();
+      const [_batch, log] = await db.migrate.latest();
       
       if (log.length === 0) {
         console.log('✅ 数据库已是最新版本');
       } else {
         console.log(`✅ 成功运行 ${log.length} 个迁移文件:`);
-        log.forEach(migration => {
+        log.forEach((migration: string) => {
           console.log(`   - ${migration}`);
         });
       }
@@ -200,7 +203,9 @@ export class Database {
         status: 'unhealthy',
         message: '数据库健康检查失败',
         details: {
-          error: error.message
+          error: typeof error === 'object' && error !== null && 'message' in error
+            ? (error as { message: string }).message
+            : String(error)
         }
       };
     }
@@ -254,7 +259,7 @@ export function getDatabase(): Knex {
 
 // 导出数据库实例的快捷方式（延迟初始化）
 export const db = new Proxy({} as Knex, {
-  get(target, prop) {
+  get(_target, prop) {
     const instance = getDatabase();
     const value = instance[prop as keyof Knex];
     return typeof value === 'function' ? value.bind(instance) : value;

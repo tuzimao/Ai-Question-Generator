@@ -1,6 +1,6 @@
 // src/services/StorageService.ts
 
-import { Client as MinioClient, BucketItem, UploadedObjectInfo } from 'minio';
+import { Client as MinioClient, BucketItem} from 'minio';
 import { Readable } from 'stream';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -46,11 +46,11 @@ export interface BucketConfig {
  */
 export class StorageService {
   private client: MinioClient | null = null;
-  private readonly endpoint: string;
-  private readonly port: number;
-  private readonly useSSL: boolean;
-  private readonly accessKey: string;
-  private readonly secretKey: string;
+  private readonly endpoint!: string;
+  private readonly port!: number;
+  private readonly useSSL!: boolean;
+  private readonly accessKey!: string;
+  private readonly secretKey!: string;
   private isConnected: boolean = false;
   private initializationError: string | null = null;
 
@@ -73,7 +73,7 @@ export class StorageService {
 
       console.log(`📁 MinIO存储服务构造完成: ${this.endpoint}:${this.port}`);
     } catch (error) {
-      this.initializationError = error.message;
+      this.initializationError = typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error);
       console.error('❌ MinIO存储服务构造失败:', error);
     }
   }
@@ -140,7 +140,7 @@ export class StorageService {
       await this.client.listBuckets();
       return true;
     } catch (error) {
-      console.error('MinIO健康检查失败:', error.message);
+      console.error('MinIO健康检查失败:', typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error));
       return false;
     }
   }
@@ -161,7 +161,7 @@ export class StorageService {
       throw new Error('MinIO客户端未初始化');
     }
 
-    for (const [key, bucketName] of Object.entries(this.defaultBuckets)) {
+    for (const [_key, bucketName] of Object.entries(this.defaultBuckets)) {
       try {
         const exists = await this.client.bucketExists(bucketName);
         if (!exists) {
@@ -206,24 +206,13 @@ export class StorageService {
       };
 
       // 上传文件
-      let uploadResult: UploadedObjectInfo;
-      if (Buffer.isBuffer(stream)) {
-        uploadResult = await this.client.putObject(
-          config.bucket,
-          objectName,
-          stream,
-          stream.length,
-          metadata
-        );
-      } else {
-        uploadResult = await this.client.putObject(
-          config.bucket,
-          objectName,
-          stream,
-          undefined,
-          metadata
-        );
-      }
+      await this.client.putObject(
+        config.bucket,
+        objectName,
+        stream,
+        Buffer.isBuffer(stream) ? stream.length : undefined,
+        metadata
+      );
 
       // 获取文件信息
       const stat = await this.client.statObject(config.bucket, objectName);
@@ -247,7 +236,10 @@ export class StorageService {
       return fileInfo;
     } catch (error) {
       console.error('文件上传失败:', error);
-      throw new Error(`文件上传失败: ${error.message}`);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error
+        ? (error as { message: string }).message
+        : String(error);
+      throw new Error(`文件上传失败: ${errorMessage}`);
     }
   }
 
@@ -267,7 +259,10 @@ export class StorageService {
       return stream;
     } catch (error) {
       console.error('文件下载失败:', error);
-      throw new Error(`文件下载失败: ${error.message}`);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error
+        ? (error as { message: string }).message
+        : String(error);
+      throw new Error(`文件下载失败: ${errorMessage}`);
     }
   }
 
@@ -298,7 +293,7 @@ export class StorageService {
         metadata: stat.metaData
       };
     } catch (error) {
-      if (error.code === 'NotFound') {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'NotFound') {
         return null;
       }
       console.error('获取文件信息失败:', error);
@@ -504,7 +499,14 @@ export class StorageService {
     }
 
     try {
-      const buckets = await this.client.listBuckets();
+      const bucketsRaw = await this.client.listBuckets();
+      const buckets: BucketItem[] = bucketsRaw.map((bucket: any) => ({
+        name: bucket.name,
+        size: 0,
+        etag: '',
+        lastModified: new Date(),
+        // prefix is optional and not set here
+      }));
       return buckets;
     } catch (error) {
       console.error('获取存储桶列表失败:', error);
@@ -531,7 +533,7 @@ export class StorageService {
       let fileCount = 0;
 
       for (const bucket of buckets) {
-        const files = await this.listFiles(bucket.name);
+        const files = await this.listFiles(bucket.name ?? '');
         fileCount += files.length;
         totalSize += files.reduce((sum, file) => sum + file.size, 0);
       }

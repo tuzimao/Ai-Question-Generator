@@ -67,7 +67,7 @@ export class AIService {
   private encoder: any = null;
   private readonly defaultEmbeddingModel: string;
   private readonly defaultChatModel: string;
-  private readonly maxRetries: number;
+ // private readonly maxRetries: number;
   private isInitialized: boolean = false;
   private initializationError: string | null = null;
 
@@ -75,7 +75,7 @@ export class AIService {
     // 延迟初始化，不在构造函数中验证API密钥
     this.defaultEmbeddingModel = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
     this.defaultChatModel = process.env.OPENAI_MODEL || 'gpt-4';
-    this.maxRetries = 3;
+   // this.maxRetries = 3;
 
     console.log(`🤖 AI服务构造完成（延迟初始化）`);
   }
@@ -116,8 +116,9 @@ export class AIService {
       console.log(`   嵌入模型: ${this.defaultEmbeddingModel}`);
       console.log(`   聊天模型: ${this.defaultChatModel}`);
     } catch (error) {
-      this.initializationError = error.message;
-      console.error('AI服务初始化失败:', error.message);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error);
+      this.initializationError = errorMessage;
+      console.error('AI服务初始化失败:', errorMessage);
       throw error;
     }
   }
@@ -147,7 +148,8 @@ export class AIService {
       await this.openai.models.list();
       return true;
     } catch (error) {
-      console.error('OpenAI健康检查失败:', error.message);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error);
+      console.error('OpenAI健康检查失败:', errorMessage);
       return false;
     }
   }
@@ -193,13 +195,14 @@ export class AIService {
       }
 
       return {
-        vector: response.data[0].embedding,
+        vector: response.data[0]?.embedding ?? [],
         tokens: response.usage?.total_tokens || tokens,
         model
       };
     } catch (error) {
       console.error('生成嵌入向量失败:', error);
-      throw new Error(`嵌入生成失败: ${error.message}`);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error);
+      throw new Error(`嵌入生成失败: ${errorMessage}`);
     }
   }
 
@@ -225,6 +228,9 @@ export class AIService {
 
         console.log(`🔄 处理嵌入向量批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(texts.length / batchSize)}`);
 
+        if (!this.openai) {
+          throw new Error('OpenAI客户端未初始化');
+        }
         const response = await this.openai.embeddings.create({
           model: embeddingModel,
           input: cleanBatch,
@@ -235,7 +241,7 @@ export class AIService {
         response.data.forEach((embedding, index) => {
           results.push({
             vector: embedding.embedding,
-            tokens: this.countTokens(cleanBatch[index]),
+            tokens: this.countTokens(cleanBatch[index] ?? ''),
             model: embeddingModel
           });
         });
@@ -298,7 +304,8 @@ export class AIService {
       };
     } catch (error) {
       console.error('聊天完成失败:', error);
-      throw new Error(`聊天完成失败: ${error.message}`);
+      const errorMessage = typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error);
+      throw new Error(`聊天完成失败: ${errorMessage}`);
     }
   }
 
@@ -314,6 +321,9 @@ export class AIService {
     const maxTokens = request.maxTokens || parseInt(process.env.OPENAI_MAX_TOKENS || '2000', 10);
     
     try {
+      if (!this.openai) {
+        throw new Error('OpenAI客户端未初始化');
+      }
       const stream = await this.openai.chat.completions.create({
         model,
         messages: request.messages,
@@ -410,7 +420,11 @@ export class AIService {
       'text-embedding-3-large': { input: 0.00000013, output: 0 }
     };
 
-    const modelPricing = pricing[modelName] || pricing['gpt-4'];
+    const modelPricing = pricing[modelName] ?? pricing['gpt-4'];
+    if (!modelPricing) {
+      // Fallback to zero cost if pricing is not available
+      return 0;
+    }
     return (usage.input * modelPricing.input) + (usage.output * modelPricing.output);
   }
 

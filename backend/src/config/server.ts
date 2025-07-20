@@ -95,7 +95,7 @@ export class ServerConfig {
     await server.register(rateLimit, {
       max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
       timeWindow: parseInt(process.env.RATE_LIMIT_TIME_WINDOW || '60000', 10),
-      errorResponseBuilder: (req, context) => ({
+      errorResponseBuilder: (_req, context) => ({
         success: false,
         error: '请求过于频繁，请稍后再试',
         message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)} seconds.`,
@@ -110,7 +110,7 @@ export class ServerConfig {
    */
   private addHooks(server: FastifyInstance): void {
     // 请求前钩子 - 添加自定义请求上下文
-    server.addHook('preHandler', async (request, reply) => {
+    server.addHook('preHandler', async (request, _reply) => {
       const context: RequestContext = {
         requestId: request.id,
         timestamp: new Date()
@@ -177,7 +177,7 @@ export class ServerConfig {
   /**
    * 获取用户友好的错误消息
    */
-  private getErrorMessage(error: any, statusCode: number): string {
+  private getErrorMessage(_error: any, statusCode: number): string {
     switch (statusCode) {
       case 400:
         return '请求参数错误';

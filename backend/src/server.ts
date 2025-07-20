@@ -169,7 +169,7 @@ class App {
         await vectorService.initialize();
         console.log('✅ Qdrant向量服务初始化完成');
       } catch (error) {
-        console.warn('⚠️ Qdrant向量服务初始化失败:', error.message);
+        console.warn('⚠️ Qdrant向量服务初始化失败:', error instanceof Error ? error.message : String(error));
         console.warn('💡 请确保Qdrant容器正在运行: docker-compose up qdrant');
       }
 
@@ -178,7 +178,7 @@ class App {
         await storageService.initialize();
         console.log('✅ MinIO存储服务初始化完成');
       } catch (error) {
-        console.warn('⚠️ MinIO存储服务初始化失败:', error.message);
+        console.warn('⚠️ MinIO存储服务初始化失败:', error instanceof Error ? error.message : String(error));
         console.warn('💡 请确保MinIO容器正在运行: docker-compose up minio');
       }
       
@@ -192,7 +192,7 @@ class App {
           console.log('✅ OpenAI API连接正常');
         }
       } catch (error) {
-        console.warn('⚠️ OpenAI API初始化失败:', error.message);
+        console.warn('⚠️ OpenAI API初始化失败:', error instanceof Error ? error.message : String(error));
       }
       
       console.log('✅ 外部服务初始化完成');
@@ -231,7 +231,7 @@ class App {
         console.error('❌ storageService.healthCheck 不是函数');
       }
       // 增强版健康检查路由
-      server.get('/health', async (request, reply) => {
+      server.get('/health', async (_request, reply) => {
         const startTime = Date.now();
         
         try {
@@ -243,7 +243,12 @@ class App {
             dbHealth = await Database.healthCheck();
           } catch (error) {
             console.error('数据库健康检查异常:', error);
-            dbHealth = { status: 'unhealthy', message: `数据库检查失败: ${error.message}` };
+            dbHealth = { 
+              status: 'unhealthy', 
+              message: `数据库检查失败: ${
+                error instanceof Error ? error.message : String(error)
+              }` 
+            };
           }
 
           // 向量服务健康检查
@@ -259,7 +264,7 @@ class App {
             vectorHealth = {
               healthy: false,
               connected: false,
-              error: error.message
+              error: error instanceof Error ? error.message : String(error)
             };
           }
 
@@ -274,7 +279,7 @@ class App {
             console.error('AI服务健康检查异常:', error);
             aiHealth = {
               healthy: false,
-              error: error.message
+              error: error instanceof Error ? error.message : String(error)
             };
           }
 
@@ -291,7 +296,7 @@ class App {
             storageHealth = {
               healthy: false,
               connected: false,
-              error: error.message
+              error: error instanceof Error ? error.message : String(error)
             };
           }
 
@@ -355,14 +360,14 @@ class App {
           reply.status(500).send({
             success: false,
             error: '健康检查失败',
-            message: error.message,
+            message: error instanceof Error ? error.message : String(error),
             timestamp: new Date().toISOString()
           });
         }
       });
 
       // 详细服务状态检查路由
-      server.get('/health/detailed', async (request, reply) => {
+      server.get('/health/detailed', async (_request, reply) => {
         try {
           console.log('开始详细健康检查...');
           
@@ -376,15 +381,17 @@ class App {
               vectorInfo = await vectorService.getCollectionInfo();
             }
           } catch (error) {
-            console.warn('获取向量集合信息失败:', error.message);
-            vectorInfo = { error: error.message };
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.warn('获取向量集合信息失败:', errorMsg);
+            vectorInfo = { error: errorMsg };
           }
 
           try {
             availableModels = await aiService.getAvailableModels();
           } catch (error) {
-            console.warn('获取AI模型列表失败:', error.message);
-            availableModels = [`Error: ${error.message}`];
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.warn('获取AI模型列表失败:', errorMsg);
+            availableModels = [`Error: ${errorMsg}`];
           }
 
           try {
@@ -392,8 +399,9 @@ class App {
               storageStats = await storageService.getStorageStats();
             }
           } catch (error) {
-            console.warn('获取存储统计失败:', error.message);
-            storageStats = { error: error.message };
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.warn('获取存储统计失败:', errorMsg);
+            storageStats = { error: errorMsg };
           }
           
           const detailedStatus = {
@@ -439,14 +447,14 @@ class App {
           reply.status(500).send({
             success: false,
             error: '详细健康检查失败',
-            message: error.message,
+            message: error instanceof Error ? error.message : String(error),
             timestamp: new Date().toISOString()
           });
         }
       });
 
       // 服务初始化状态检查
-      server.get('/health/init', async (request, reply) => {
+      server.get('/health/init', async (_request, reply) => {
         const initStatus = {
           timestamp: new Date().toISOString(),
           initialization: {
@@ -467,7 +475,7 @@ class App {
       });
 
       // API信息路由
-      server.get('/api/info', async (request, reply) => {
+      server.get('/api/info', async (_request, reply) => {
         const response: BaseResponse = {
           success: true,
           message: 'AI题目生成器API服务',
@@ -589,7 +597,7 @@ class App {
         await storageService.close();
         console.log('✅ 外部服务已关闭');
       } catch (error) {
-        console.warn('⚠️ 外部服务关闭时出现警告:', error.message);
+        console.warn('⚠️ 外部服务关闭时出现警告:', error instanceof Error ? error.message : String(error));
       }
 
       // 关闭数据库连接

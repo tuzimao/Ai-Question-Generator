@@ -37,7 +37,7 @@ export interface CollectionConfig {
  */
 export class VectorService {
   private client: QdrantClient | null = null;
-  private readonly defaultCollection: string;
+  private readonly defaultCollection!: string;
   private isConnected: boolean = false;
   private initializationError: string | null = null;
 
@@ -47,16 +47,17 @@ export class VectorService {
       const apiKey = process.env.QDRANT_API_KEY;
 
       // 初始化Qdrant客户端
-      this.client = new QdrantClient({
-        url: qdrantUrl,
-        apiKey: apiKey || undefined
-      });
+      this.client = new QdrantClient(
+        apiKey
+          ? { url: qdrantUrl, apiKey }
+          : { url: qdrantUrl }
+      );
 
       this.defaultCollection = process.env.QDRANT_COLLECTION_NAME || 'documents';
       
       console.log(`🔗 Qdrant向量服务初始化: ${qdrantUrl}`);
     } catch (error) {
-      this.initializationError = error.message;
+      this.initializationError = typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error);
       console.error('❌ Qdrant向量服务构造函数失败:', error);
     }
   }
@@ -120,7 +121,11 @@ export class VectorService {
       await this.client.getCollections();
       return true;
     } catch (error) {
-      console.error('Qdrant健康检查失败:', error.message || error);
+      if (typeof error === 'object' && error !== null && 'message' in error) {
+        console.error('Qdrant健康检查失败:', (error as { message: string }).message);
+      } else {
+        console.error('Qdrant健康检查失败:', error);
+      }
       return false;
     }
   }
@@ -194,6 +199,9 @@ export class VectorService {
    */
   public async deleteCollection(collectionName: string): Promise<void> {
     try {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
       await this.client.deleteCollection(collectionName);
       console.log(`🗑️ 成功删除集合: ${collectionName}`);
     } catch (error) {
@@ -223,6 +231,9 @@ export class VectorService {
         }
       }));
 
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
       await this.client.upsert(collection, {
         wait: true,
         points: formattedPoints
@@ -254,13 +265,19 @@ export class VectorService {
     const collection = collectionName || this.defaultCollection;
     
     try {
-      const searchResult = await this.client.search(collection, {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
+      const searchOptions: any = {
         vector: queryVector,
         limit,
         score_threshold: scoreThreshold,
-        filter: filter ? { must: [filter] } : undefined,
         with_payload: true
-      });
+      };
+      if (filter) {
+        searchOptions.filter = { must: [filter] };
+      }
+      const searchResult = await this.client.search(collection, searchOptions);
 
       return searchResult.map(result => ({
         id: result.id as string,
@@ -286,6 +303,9 @@ export class VectorService {
     const collection = collectionName || this.defaultCollection;
     
     try {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
       const result = await this.client.retrieve(collection, {
         ids,
         with_payload: true,
@@ -315,6 +335,9 @@ export class VectorService {
     const collection = collectionName || this.defaultCollection;
     
     try {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
       await this.client.delete(collection, {
         wait: true,
         points: ids
@@ -336,6 +359,9 @@ export class VectorService {
     const collection = collectionName || this.defaultCollection;
     
     try {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
       return await this.client.getCollection(collection);
     } catch (error) {
       console.error(`获取集合信息失败 ${collection}:`, error);
@@ -354,16 +380,22 @@ export class VectorService {
     limit: number = 100,
     offset?: string,
     collectionName?: string
-  ): Promise<{ points: VectorPoint[]; nextOffset?: string }> {
+  ): Promise<{ points: VectorPoint[]; nextOffset: string | undefined }> {
     const collection = collectionName || this.defaultCollection;
     
     try {
-      const result = await this.client.scroll(collection, {
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
+      const scrollOptions: any = {
         limit,
-        offset,
         with_payload: true,
         with_vector: false // 为了性能，通常不需要返回向量
-      });
+      };
+      if (offset !== undefined) {
+        scrollOptions.offset = offset;
+      }
+      const result = await this.client.scroll(collection, scrollOptions);
 
       const points = result.points.map(point => ({
         id: point.id as string,
@@ -399,13 +431,22 @@ export class VectorService {
     const collection = collectionName || this.defaultCollection;
     
     try {
-      const searchQueries = queries.map(query => ({
-        vector: query.vector,
-        limit: query.limit || 10,
-        score_threshold: query.scoreThreshold || 0.7,
-        filter: query.filter ? { must: [query.filter] } : undefined,
-        with_payload: true
-      }));
+      if (!this.client) {
+        throw new Error('Qdrant客户端未初始化');
+      }
+
+      const searchQueries = queries.map(query => {
+        const searchQuery: any = {
+          vector: query.vector,
+          limit: query.limit || 10,
+          score_threshold: query.scoreThreshold || 0.7,
+          with_payload: true
+        };
+        if (query.filter) {
+          searchQuery.filter = { must: [query.filter] };
+        }
+        return searchQuery;
+      });
 
       const results = await this.client.searchBatch(collection, {
         searches: searchQueries

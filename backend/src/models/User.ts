@@ -4,7 +4,7 @@ import { Knex } from 'knex';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
 import { db } from '@/utils/database';
-import { User, UserRole, BaseEntity } from '@/types/base';
+import { User, UserRole } from '@/types/base';
 
 /**
  * 创建用户请求接口
