@@ -18,6 +18,7 @@ console.log('OPENAI_API_KEY length:', process.env.OPENAI_API_KEY?.length || 0);
 
 // 现在导入其他模块
 import ServerConfig from '@/config/server';
+import SwaggerConfig from '@/config/SwaggerConfig'; // 添加 Swagger 导入
 import Database from '@/utils/database';
 import { vectorService } from '@/services/VectorService';
 import { aiService } from '@/services/AIService';
@@ -59,6 +60,9 @@ class App {
       // 设置认证中间件
       await this.setupAuthentication();
       
+      // 📚 注册 Swagger 文档（在路由注册之前）
+      await this.registerSwagger();
+      
       // 注册路由
       await this.registerRoutes();
       
@@ -78,10 +82,8 @@ class App {
       console.log(`🏥 健康检查: http://${host}:${port}/health`);
       console.log(`🔬 详细状态: http://${host}:${port}/health/detailed`);
       
-      // 显示API文档地址（如果启用）
-      if (process.env.API_DOCS_ENABLED === 'true') {
-        console.log(`📚 API文档: http://${host}:${port}/docs`);
-      }
+      // 显示API文档地址
+      console.log(`📚 API文档: http://${host}:${port}/docs`);
       
     } catch (error) {
       console.error('❌ 应用程序启动失败:', error);
@@ -255,6 +257,20 @@ class App {
     });
 
     console.log('✅ JWT认证中间件设置完成');
+  }
+
+  /**
+   * 注册 Swagger 文档
+   */
+  private async registerSwagger(): Promise<void> {
+    try {
+      const server = this.serverConfig.getServer();
+      await SwaggerConfig.registerSwagger(server);
+      console.log('✅ Swagger文档插件注册完成');
+    } catch (error) {
+      console.error('❌ Swagger文档注册失败:', error);
+      throw error;
+    }
   }
 
   /**
@@ -553,7 +569,7 @@ class App {
               health_init: '/health/init',
               api_info: '/api/info',
               documents: '/v1/documents',
-              docs: process.env.API_DOCS_ENABLED === 'true' ? '/docs' : null
+              docs: '/docs'
             },
             services: {
               database: 'MySQL + Knex ORM',

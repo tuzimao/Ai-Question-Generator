@@ -43,7 +43,17 @@ export class ServerConfig {
     const serverOptions: FastifyServerOptions = {
       logger,
       genReqId: () => uuidv4(),
-      bodyLimit: parseInt(process.env.MAX_FILE_SIZE || '52428800', 10) // 50MB
+      bodyLimit: parseInt(process.env.MAX_FILE_SIZE || '52428800', 10), // 50MB
+      // 🔧 配置 JSON Schema 编译器以支持额外关键字
+      ajv: {
+        customOptions: {
+          strict: false, // 关闭严格模式
+          removeAdditional: false, // 保留额外属性
+          useDefaults: true, // 使用默认值
+          allowUnionTypes: true, // 允许联合类型
+          keywords: ['example'] // 明确允许 example 关键字
+        }
+      }
     };
 
     const server = Fastify(serverOptions);

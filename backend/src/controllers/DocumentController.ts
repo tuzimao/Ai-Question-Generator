@@ -1,6 +1,6 @@
 // src/controllers/DocumentController.ts
 
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply, RouteHandlerMethod } from 'fastify';
 import { MultipartFile } from '@fastify/multipart';
 import DocumentService, {
   CreateDocumentServiceRequest,
@@ -11,63 +11,6 @@ import FileUploadService, { FileStreamInfo } from '@/services/FileUploadService'
 import { DocumentIngestStatus } from '@/models/Document';
 import { BaseResponse } from '@/types/base';
 import { getErrorMessage } from '@/utils/typescript-helpers';
-import SwaggerConfig from '@/config/SwaggerConfig';
-
-/**
- * 文档上传请求体接口
- */
-interface DocumentUploadRequest {
-  Body: {
-    metadata?: string; // JSON字符串
-    parseConfig?: string; // JSON字符串
-    chunkConfig?: string; // JSON字符串
-  };
-}
-
-/**
- * 文档列表查询参数接口
- */
-interface DocumentListQuery {
-  Querystring: {
-    page?: string;
-    limit?: string;
-    status?: DocumentIngestStatus;
-    mimeType?: string;
-    sortBy?: 'created_at' | 'updated_at' | 'filename' | 'size_bytes';
-    sortOrder?: 'asc' | 'desc';
-  };
-}
-
-/**
- * 文档详情参数接口
- */
-interface DocumentDetailParams {
-  Params: {
-    docId: string;
-  };
-}
-
-/**
- * 文档状态更新请求接口
- */
-interface DocumentStatusUpdateRequest {
-  Params: {
-    docId: string;
-  };
-  Body: {
-    status: DocumentIngestStatus;
-    errorMessage?: string;
-    metadata?: Record<string, any>;
-    parseResults?: {
-      pageCount?: number;
-      language?: string;
-      textLength?: number;
-      tokenEstimate?: number;
-    };
-  };
-}
-
-
 
 /**
  * 文档控制器类
@@ -83,7 +26,6 @@ export class DocumentController {
     
     // 📤 文档上传API
     server.post('/v1/documents', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '上传文档文件',
@@ -101,18 +43,15 @@ export class DocumentController {
             },
             metadata: {
               type: 'string',
-              description: '文档元数据（JSON字符串）',
-              example: '{"tags":["教育","数学"],"description":"高中数学教材"}'
+              description: '文档元数据（JSON字符串）'
             },
             parseConfig: {
               type: 'string', 
-              description: '解析配置（JSON字符串）',
-              example: '{"extractImages":false,"preserveFormatting":true}'
+              description: '解析配置（JSON字符串）'
             },
             chunkConfig: {
               type: 'string',
-              description: '分块配置（JSON字符串）', 
-              example: '{"targetTokens":400,"overlapTokens":60}'
+              description: '分块配置（JSON字符串）'
             }
           },
           required: ['file']
@@ -120,19 +59,78 @@ export class DocumentController {
         response: {
           200: {
             description: '文档上传成功',
-            ...SwaggerConfig.getSwaggerOptions().openapi.components!.schemas!.DocumentUploadResponse
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              data: {
+                type: 'object',
+                properties: {
+                  doc_id: { type: 'string', format: 'uuid' },
+                  filename: { type: 'string' },
+                  status: { type: 'string', enum: Object.values(DocumentIngestStatus) },
+                  size_bytes: { type: 'integer' },
+                  mime_type: { type: 'string' },
+                  content_hash: { type: 'string' },
+                  existingDocument: { type: 'boolean' },
+                  processing_job_id: { type: 'string', format: 'uuid' },
+                  created_at: { type: 'string', format: 'date-time' }
+                }
+              },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
           },
-          400: SwaggerConfig.getErrorResponseSchema(400, '请求参数错误或文件格式不支持'),
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          413: SwaggerConfig.getErrorResponseSchema(413, '文件大小超过限制（50MB）'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '服务器内部错误')
+          400: {
+            description: '请求参数错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          413: {
+            description: '文件大小超过限制',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.uploadDocument.bind(this));
+    }, this.uploadDocument as RouteHandlerMethod);
 
     // 📋 获取文档列表API
     server.get('/v1/documents', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '获取用户的文档列表',
@@ -182,17 +180,73 @@ export class DocumentController {
         response: {
           200: {
             description: '获取文档列表成功',
-            ...SwaggerConfig.getSwaggerOptions().openapi.components!.schemas!.DocumentListResponse
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              data: {
+                type: 'object',
+                properties: {
+                  documents: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        doc_id: { type: 'string', format: 'uuid' },
+                        filename: { type: 'string' },
+                        size_bytes: { type: 'integer' },
+                        mime_type: { type: 'string' },
+                        ingest_status: { type: 'string', enum: Object.values(DocumentIngestStatus) },
+                        created_at: { type: 'string', format: 'date-time' },
+                        updated_at: { type: 'string', format: 'date-time' }
+                      }
+                    }
+                  },
+                  pagination: {
+                    type: 'object',
+                    properties: {
+                      current: { type: 'integer' },
+                      total: { type: 'integer' },
+                      pages: { type: 'integer' },
+                      limit: { type: 'integer' },
+                      hasNext: { type: 'boolean' },
+                      hasPrev: { type: 'boolean' }
+                    }
+                  }
+                }
+              },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
           },
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '服务器内部错误')
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.getDocumentList.bind(this));
+    }, this.getDocumentList as RouteHandlerMethod);
 
     // 📄 获取文档详情API
     server.get('/v1/documents/:docId', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '获取指定文档的详细信息',
@@ -205,8 +259,7 @@ export class DocumentController {
             docId: { 
               type: 'string', 
               format: 'uuid',
-              description: '文档唯一标识符',
-              example: '550e8400-e29b-41d4-a716-446655440000'
+              description: '文档唯一标识符'
             }
           },
           required: ['docId']
@@ -214,19 +267,80 @@ export class DocumentController {
         response: {
           200: {
             description: '获取文档详情成功',
-            ...SwaggerConfig.getSwaggerOptions().openapi.components!.schemas!.DocumentDetailResponse
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              data: {
+                type: 'object',
+                properties: {
+                  doc_id: { type: 'string', format: 'uuid' },
+                  filename: { type: 'string' },
+                  size_bytes: { type: 'integer' },
+                  mime_type: { type: 'string' },
+                  ingest_status: { type: 'string', enum: Object.values(DocumentIngestStatus) },
+                  downloadUrl: { type: 'string', format: 'uri' },
+                  canDownload: { type: 'boolean' },
+                  canDelete: { type: 'boolean' },
+                  canReprocess: { type: 'boolean' },
+                  created_at: { type: 'string', format: 'date-time' },
+                  updated_at: { type: 'string', format: 'date-time' }
+                }
+              },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
           },
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          403: SwaggerConfig.getErrorResponseSchema(403, '无权限访问该文档'),
-          404: SwaggerConfig.getErrorResponseSchema(404, '文档不存在'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '服务器内部错误')
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          403: {
+            description: '权限不足',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          404: {
+            description: '文档不存在',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              message: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.getDocumentDetail.bind(this));
+    }, this.getDocumentDetail as RouteHandlerMethod);
 
     // 📊 获取文档处理状态API
     server.get('/v1/documents/:docId/status', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '获取文档处理状态和进度',
@@ -247,19 +361,81 @@ export class DocumentController {
         response: {
           200: {
             description: '获取文档状态成功',
-            ...SwaggerConfig.getSwaggerOptions().openapi.components!.schemas!.DocumentProgressResponse
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              message: { type: 'string' },
+              data: {
+                type: 'object',
+                properties: {
+                  document: {
+                    type: 'object',
+                    properties: {
+                      doc_id: { type: 'string', format: 'uuid' },
+                      filename: { type: 'string' },
+                      ingest_status: { type: 'string', enum: Object.values(DocumentIngestStatus) }
+                    }
+                  },
+                  progress: {
+                    type: 'object',
+                    properties: {
+                      stage: { type: 'string' },
+                      percentage: { type: 'integer', minimum: 0, maximum: 100 },
+                      message: { type: 'string' }
+                    }
+                  }
+                }
+              },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
           },
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          403: SwaggerConfig.getErrorResponseSchema(403, '无权限查看该文档'),
-          404: SwaggerConfig.getErrorResponseSchema(404, '文档不存在'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '服务器内部错误')
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          403: {
+            description: '权限不足',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          404: {
+            description: '文档不存在',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.getDocumentStatus.bind(this));
+    }, this.getDocumentStatus as RouteHandlerMethod);
 
     // 🗑️ 删除文档API
     server.delete('/v1/documents/:docId', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '删除指定文档',
@@ -289,29 +465,60 @@ export class DocumentController {
         },
         response: {
           200: {
-            description: '删除文档成功',
             type: 'object',
             properties: {
-              success: { type: 'boolean', enum: [true] },
-              message: { 
-                type: 'string',
-                enum: ['文档已删除', '文档已永久删除']
-              },
+              success: { type: 'boolean' },
+              message: { type: 'string' },
               timestamp: { type: 'string', format: 'date-time' },
               requestId: { type: 'string' }
             }
           },
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          403: SwaggerConfig.getErrorResponseSchema(403, '无权限删除该文档'),
-          404: SwaggerConfig.getErrorResponseSchema(404, '文档不存在'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '删除操作失败')
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          403: {
+            description: '权限不足',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          404: {
+            description: '文档不存在',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.deleteDocument.bind(this));
+    }, this.deleteDocument as RouteHandlerMethod);
 
     // 🔄 重新处理文档API
     server.post('/v1/documents/:docId/reprocess', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '重新处理指定文档',
@@ -331,11 +538,10 @@ export class DocumentController {
         },
         response: {
           200: {
-            description: '重新处理启动成功',
             type: 'object',
             properties: {
-              success: { type: 'boolean', enum: [true] },
-              message: { type: 'string', enum: ['文档重新处理已启动'] },
+              success: { type: 'boolean' },
+              message: { type: 'string' },
               data: {
                 type: 'object',
                 properties: {
@@ -345,8 +551,8 @@ export class DocumentController {
                       type: 'object',
                       properties: {
                         job_id: { type: 'string', format: 'uuid' },
-                        job_type: { $ref: '#/components/schemas/JobType' },
-                        status: { $ref: '#/components/schemas/JobStatus' },
+                        job_type: { type: 'string' },
+                        status: { type: 'string' },
                         created_at: { type: 'string', format: 'date-time' }
                       }
                     }
@@ -357,18 +563,62 @@ export class DocumentController {
               requestId: { type: 'string' }
             }
           },
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          403: SwaggerConfig.getErrorResponseSchema(403, '无权限重新处理该文档'),
-          404: SwaggerConfig.getErrorResponseSchema(404, '文档不存在'),
-          409: SwaggerConfig.getErrorResponseSchema(409, '文档正在处理中，无法重新处理'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '重新处理失败')
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          403: {
+            description: '权限不足',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          404: {
+            description: '文档不存在',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          409: {
+            description: '文档正在处理中',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.reprocessDocument.bind(this));
+    }, this.reprocessDocument as RouteHandlerMethod);
 
     // 📥 下载文档API
     server.get('/v1/documents/:docId/download', {
-      //preHandler: [server.authenticate],
       preHandler: [(req, reply, done) => done()],
       schema: {
         description: '下载原始文档文件',
@@ -397,13 +647,49 @@ export class DocumentController {
               }
             }
           },
-          401: SwaggerConfig.getErrorResponseSchema(401, '用户未认证'),
-          403: SwaggerConfig.getErrorResponseSchema(403, '文档不可下载或无权限'),
-          404: SwaggerConfig.getErrorResponseSchema(404, '文档不存在'),
-          500: SwaggerConfig.getErrorResponseSchema(500, '生成下载链接失败')
+          401: {
+            description: '用户未认证',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          403: {
+            description: '权限不足或文档不可下载',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          404: {
+            description: '文档不存在',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          },
+          500: {
+            description: '服务器内部错误',
+            type: 'object',
+            properties: {
+              success: { type: 'boolean' },
+              error: { type: 'string' },
+              timestamp: { type: 'string', format: 'date-time' },
+              requestId: { type: 'string' }
+            }
+          }
         }
       }
-    }, this.downloadDocument.bind(this));
+    }, this.downloadDocument as RouteHandlerMethod);
 
     console.log('✅ 文档路由注册完成（包含完整Swagger文档）');
   }
@@ -412,7 +698,7 @@ export class DocumentController {
    * 上传文档处理器
    */
   private static async uploadDocument(
-    request: FastifyRequest<{ Body: { metadata?: string; parseConfig?: string; chunkConfig?: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -450,14 +736,17 @@ export class DocumentController {
       let chunkConfig: Record<string, any> = {};
 
       try {
-        if (request.body?.metadata) {
-          metadata = JSON.parse(request.body.metadata);
-        }
-        if (request.body?.parseConfig) {
-          parseConfig = JSON.parse(request.body.parseConfig);
-        }
-        if (request.body?.chunkConfig) {
-          chunkConfig = JSON.parse(request.body.chunkConfig);
+        if (request.body && typeof request.body === 'object') {
+          const body = request.body as any;
+          if (body.metadata) {
+            metadata = JSON.parse(body.metadata);
+          }
+          if (body.parseConfig) {
+            parseConfig = JSON.parse(body.parseConfig);
+          }
+          if (body.chunkConfig) {
+            chunkConfig = JSON.parse(body.chunkConfig);
+          }
         }
       } catch (error) {
         const response: BaseResponse = {
@@ -539,7 +828,7 @@ export class DocumentController {
    * 获取文档列表处理器
    */
   private static async getDocumentList(
-    request: FastifyRequest<DocumentListQuery>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -555,14 +844,15 @@ export class DocumentController {
       }
 
       // 解析查询参数
+      const query = request.query as any;
       const listRequest: DocumentListRequest = {
         userId: request.appUser.id,
-        page: request.query.page ? parseInt(request.query.page, 10) : 1,
-        limit: request.query.limit ? parseInt(request.query.limit, 10) : 20,
-        status: request.query.status,
-        mimeType: request.query.mimeType,
-        sortBy: request.query.sortBy || 'created_at',
-        sortOrder: request.query.sortOrder || 'desc'
+        page: query.page ? parseInt(query.page, 10) : 1,
+        limit: query.limit ? parseInt(query.limit, 10) : 20,
+        status: query.status,
+        mimeType: query.mimeType,
+        sortBy: query.sortBy || 'created_at',
+        sortOrder: query.sortOrder || 'desc'
       };
 
       // 获取文档列表
@@ -595,7 +885,7 @@ export class DocumentController {
    * 获取文档详情处理器
    */
   private static async getDocumentDetail(
-    request: FastifyRequest<DocumentDetailParams>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -610,7 +900,8 @@ export class DocumentController {
         return;
       }
 
-      const { docId } = request.params;
+      const params = request.params as any;
+      const { docId } = params;
 
       // 获取文档详情
       const document = await DocumentService.getDocumentDetail(
@@ -661,7 +952,7 @@ export class DocumentController {
    * 获取文档状态处理器
    */
   private static async getDocumentStatus(
-    request: FastifyRequest<DocumentDetailParams>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -676,7 +967,8 @@ export class DocumentController {
         return;
       }
 
-      const { docId } = request.params;
+      const params = request.params as any;
+      const { docId } = params;
 
       // 获取文档处理进度
       const progress = await DocumentService.getDocumentProgress(
@@ -716,7 +1008,7 @@ export class DocumentController {
    * 删除文档处理器
    */
   private static async deleteDocument(
-    request: FastifyRequest<DocumentDetailParams & { Querystring: { permanent?: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -731,8 +1023,10 @@ export class DocumentController {
         return;
       }
 
-      const { docId } = request.params;
-      const permanent = request.query.permanent === 'true';
+      const params = request.params as any;
+      const query = request.query as any;
+      const { docId } = params;
+      const permanent = query.permanent === 'true';
 
       // 删除文档
       const success = await DocumentService.deleteDocument(
@@ -783,7 +1077,7 @@ export class DocumentController {
    * 重新处理文档处理器
    */
   private static async reprocessDocument(
-    request: FastifyRequest<DocumentDetailParams>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -798,7 +1092,8 @@ export class DocumentController {
         return;
       }
 
-      const { docId } = request.params;
+      const params = request.params as any;
+      const { docId } = params;
 
       // 重新处理文档
       const jobs = await DocumentService.reprocessDocument(
@@ -847,7 +1142,7 @@ export class DocumentController {
    * 下载文档处理器
    */
   private static async downloadDocument(
-    request: FastifyRequest<DocumentDetailParams>,
+    request: FastifyRequest,
     reply: FastifyReply
   ): Promise<void> {
     try {
@@ -862,7 +1157,8 @@ export class DocumentController {
         return;
       }
 
-      const { docId } = request.params;
+      const params = request.params as any;
+      const { docId } = params;
 
       // 获取文档详情
       const document = await DocumentService.getDocumentDetail(
