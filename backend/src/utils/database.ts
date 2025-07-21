@@ -6,6 +6,8 @@ import { DatabaseConfig } from '@/config/database';
 /**
  * 数据库工具类
  * 提供数据库连接管理和通用操作方法
+ * 
+ * 注意：migrations/seeds 配置由 knexfile.ts 管理，这里只处理运行时的数据库连接
  */
 export class Database {
   private static instance: Knex | null = null;
@@ -33,6 +35,7 @@ export class Database {
         throw new Error('数据库配置验证失败');
       }
 
+      // 获取纯连接配置（不包含 migrations/seeds）
       const config = DatabaseConfig.getConfig();
       const connection = knex(config);
 
@@ -47,7 +50,7 @@ export class Database {
 
   /**
    * 初始化数据库连接
-   * 测试连接并运行迁移
+   * 测试连接，但不运行迁移（迁移由 knex CLI 工具处理）
    */
   public static async initialize(): Promise<void> {
     try {
@@ -56,13 +59,13 @@ export class Database {
       // 测试数据库连接
       await this.testConnection(db);
 
-      // 运行数据库迁移
-      if (process.env.NODE_ENV !== 'test') {
-        await this.runMigrations(db);
-      }
-
       this.isConnected = true;
-      console.log('✅ 数据库初始化完成');
+      console.log('✅ 数据库连接初始化完成');
+      
+      // 提示：迁移需要单独运行
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💡 如需运行数据库迁移，请使用: npm run migrate:latest');
+      }
     } catch (error) {
       console.error('❌ 数据库初始化失败:', error);
       throw error;
@@ -83,30 +86,6 @@ export class Database {
         ? (error as { message: string }).message
         : String(error);
       throw new Error(`数据库连接失败: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * 运行数据库迁移
-   * @param db Knex实例
-   */
-  private static async runMigrations(db: Knex): Promise<void> {
-    try {
-      console.log('🔄 检查数据库迁移...');
-      
-      const [_batch, log] = await db.migrate.latest();
-      
-      if (log.length === 0) {
-        console.log('✅ 数据库已是最新版本');
-      } else {
-        console.log(`✅ 成功运行 ${log.length} 个迁移文件:`);
-        log.forEach((migration: string) => {
-          console.log(`   - ${migration}`);
-        });
-      }
-    } catch (error) {
-      console.error('❌ 数据库迁移失败:', error);
-      throw error;
     }
   }
 
@@ -239,6 +218,41 @@ export class Database {
     } catch (error) {
       console.error('获取数据库信息失败:', error);
       return null;
+    }
+  }
+
+  /**
+   * 检查表是否存在
+   * @param tableName 表名
+   * @returns 是否存在
+   */
+  public static async hasTable(tableName: string): Promise<boolean> {
+    try {
+      const db = this.getInstance();
+      return await db.schema.hasTable(tableName);
+    } catch (error) {
+      console.error(`检查表 ${tableName} 是否存在失败:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * 获取所有表名
+   * @returns 表名列表
+   */
+  public static async getAllTables(): Promise<string[]> {
+    try {
+      const db = this.getInstance();
+      const result = await db.raw(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = DATABASE()
+      `);
+      
+      return result[0].map((row: any) => row.table_name || row.TABLE_NAME);
+    } catch (error) {
+      console.error('获取表列表失败:', error);
+      return [];
     }
   }
 }

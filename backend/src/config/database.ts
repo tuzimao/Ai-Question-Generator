@@ -1,21 +1,20 @@
 // src/config/database.ts
 
 import { Knex } from 'knex';
-import path from 'path';
 
 /**
  * 数据库配置管理类
- * 负责管理不同环境下的数据库连接配置
+ * 只负责管理数据库连接配置，migrations/seeds 配置由 knexfile.ts 管理
  */
 export class DatabaseConfig {
   /**
-   * 获取当前环境的数据库配置
-   * @returns Knex配置对象
+   * 获取当前环境的数据库连接配置
+   * @returns Knex连接配置对象（不包含 migrations/seeds）
    */
   static getConfig(): Knex.Config {
     const env = process.env.NODE_ENV || 'development';
     
-    // 基础连接配置
+    // 基础连接配置（只包含连接相关的配置）
     const baseConfig: Knex.Config = {
       client: 'mysql2',
       connection: {
@@ -34,15 +33,6 @@ export class DatabaseConfig {
         createTimeoutMillis: 30000,  // 创建连接超时时间
         destroyTimeoutMillis: 5000,  // 销毁连接超时时间
         idleTimeoutMillis: 30000     // 空闲连接超时时间
-      },
-      migrations: {
-        directory: path.join(__dirname, '../migrations'),
-        tableName: 'knex_migrations',
-        extension: 'ts'
-      },
-      seeds: {
-        directory: path.join(__dirname, '../seeds'),
-        extension: 'ts'
       },
       // 启用查询调试(开发环境)
       debug: env === 'development' && process.env.DEBUG_MODE === 'true'

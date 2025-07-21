@@ -4,21 +4,45 @@ import { DatabaseConfig } from './src/config/database';
 
 dotenv.config();
 
-const MIGRATIONS_DIR = path.resolve(__dirname, 'dist/migrations');
-const SEEDS_DIR = path.resolve(__dirname, 'dist/seeds');
+const isDevelopment = process.env.NODE_ENV === 'development';
+const isTest = process.env.NODE_ENV === 'test';
+
+// 根据环境确定迁移文件路径和扩展名
+const getMigrationsConfig = () => {
+  if (isDevelopment) {
+    return {
+      directory: path.resolve(__dirname, 'src/migrations'),
+      tableName: 'knex_migrations',
+      extension: 'ts'
+    };
+  } else {
+    return {
+      directory: path.resolve(__dirname, 'dist/migrations'),
+      tableName: 'knex_migrations', 
+      extension: 'js'
+    };
+  }
+};
+
+const getSeedsConfig = () => {
+  if (isDevelopment) {
+    return {
+      directory: path.resolve(__dirname, 'src/seeds'),
+      extension: 'ts'
+    };
+  } else {
+    return {
+      directory: path.resolve(__dirname, 'dist/seeds'),
+      extension: 'js'
+    };
+  }
+};
 
 const config = {
   development: {
     ...DatabaseConfig.getConfig(),
-    migrations: {
-      directory: MIGRATIONS_DIR,
-      tableName: 'knex_migrations',
-      extension: 'js'
-    },
-    seeds: {
-      directory: SEEDS_DIR,
-      extension: 'js'
-    }
+    migrations: getMigrationsConfig(),
+    seeds: getSeedsConfig()
   },
   test: {
     ...DatabaseConfig.getConfig(),
@@ -26,11 +50,7 @@ const config = {
       ...(DatabaseConfig.getConfig().connection as object),
       database: `${process.env.DB_NAME || 'ai_question_generator'}_test`
     },
-    migrations: {
-      directory: MIGRATIONS_DIR,
-      tableName: 'knex_migrations',
-      extension: 'js'
-    }
+    migrations: getMigrationsConfig()
   },
   production: {
     ...DatabaseConfig.getConfig(),
@@ -38,11 +58,8 @@ const config = {
       ...(DatabaseConfig.getConfig().connection as object),
       database: `${process.env.DB_NAME || 'ai_question_generator'}_production`
     },
-    migrations: {
-      directory: MIGRATIONS_DIR,
-      tableName: 'knex_migrations',
-      extension: 'js'
-    }
+    migrations: getMigrationsConfig(),
+    seeds: getSeedsConfig()
   }
 };
 
