@@ -22,7 +22,10 @@ import Database from '@/utils/database';
 import { vectorService } from '@/services/VectorService';
 import { aiService } from '@/services/AIService';
 import { storageService } from '@/services/StorageService';
-import { BaseResponse } from '@/types/base';
+import DocumentController from '@/controllers/DocumentController';
+import UserModel from '@/models/User';
+import { BaseResponse, User } from '@/types/base';
+import { getErrorMessage } from '@/utils/typescript-helpers';
 
 /**
  * 应用程序主类
@@ -52,6 +55,9 @@ class App {
       
       // 初始化外部服务
       await this.initializeServices();
+      
+      // 设置认证中间件
+      await this.setupAuthentication();
       
       // 注册路由
       await this.registerRoutes();
@@ -204,6 +210,54 @@ class App {
   }
 
   /**
+   * 设置JWT认证中间件
+   */
+  private async setupAuthentication(): Promise<void> {
+    const server = this.serverConfig.getServer();
+
+    // 注册认证装饰器
+    server.decorate('authenticate', async function(request: any, reply: any) {
+      try {
+        // 从请求头获取token
+        const authHeader = request.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          throw new Error('缺少或无效的认证token');
+        }
+
+        const token = authHeader.substring(7); // 移除 'Bearer ' 前缀
+        
+        // 验证JWT token
+        const decoded = server.jwt.verify(token) as any;
+        if (!decoded || !decoded.userId) {
+          throw new Error('无效的token内容');
+        }
+
+        // 获取用户信息
+        const user = await UserModel.findById(decoded.userId);
+        if (!user || !user.is_active) {
+          throw new Error('用户不存在或已被禁用');
+        }
+
+        // 将用户信息附加到请求对象
+        request.appUser = user;
+        
+      } catch (error) {
+        const response: BaseResponse = {
+          success: false,
+          error: '认证失败',
+          message: getErrorMessage(error),
+          timestamp: new Date().toISOString(),
+          requestId: request.id
+        };
+        reply.status(401).send(response);
+        throw error; // 阻止继续处理
+      }
+    });
+
+    console.log('✅ JWT认证中间件设置完成');
+  }
+
+  /**
    * 注册路由
    */
   private async registerRoutes(): Promise<void> {
@@ -230,6 +284,7 @@ class App {
       if (typeof storageService.healthCheck !== 'function') {
         console.error('❌ storageService.healthCheck 不是函数');
       }
+
       // 增强版健康检查路由
       server.get('/health', async (_request, reply) => {
         const startTime = Date.now();
@@ -486,6 +541,7 @@ class App {
             environment: process.env.NODE_ENV || 'development',
             features: [
               '用户认证与授权',
+              '文档上传与解析',
               '文档向量化存储',
               'AI知识问答',
               '智能题目生成',
@@ -496,6 +552,7 @@ class App {
               health_detailed: '/health/detailed',
               health_init: '/health/init',
               api_info: '/api/info',
+              documents: '/v1/documents',
               docs: process.env.API_DOCS_ENABLED === 'true' ? '/docs' : null
             },
             services: {
@@ -512,6 +569,10 @@ class App {
         reply.send(response);
       });
 
+      // 🚀 注册文档API路由
+      await DocumentController.registerRoutes(server);
+      console.log('✅ 文档API路由注册完成');
+
       // 404 处理
       server.setNotFoundHandler(async (request, reply) => {
         const response: BaseResponse = {
@@ -525,7 +586,7 @@ class App {
         reply.status(404).send(response);
       });
 
-      console.log('✅ 路由注册完成（包含AI服务集成）');
+      console.log('✅ 路由注册完成（包含文档上传API）');
       
     } catch (error) {
       console.error('❌ 路由注册失败:', error);
@@ -613,6 +674,13 @@ class App {
       console.error('❌ 优雅关闭过程中发生错误:', error);
       process.exit(1);
     }
+  }
+}
+
+// 扩展 FastifyRequest 接口以支持用户信息
+declare module 'fastify' {
+  interface FastifyRequest {
+    appUser?: User;
   }
 }
 
