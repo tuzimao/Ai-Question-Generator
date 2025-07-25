@@ -80,8 +80,22 @@ export class ServerConfig {
     await server.register(cors, {
       origin: this.getCorsOrigins(),
       credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: [
+        'Content-Type', 
+        'Authorization', 
+        'X-Requested-With',
+        'Accept',
+        'Origin',
+        'User-Agent',
+        'DNT',
+        'Cache-Control',
+        'X-Mx-ReqToken',
+        'Keep-Alive',
+        'X-Requested-With',
+        'If-Modified-Since'
+      ],
+      optionsSuccessStatus: 200 // 某些旧版浏览器 (IE11, various SmartTVs) 在 204 上会中断
     });
 
     await server.register(jwt, {
@@ -118,9 +132,9 @@ export class ServerConfig {
    * 添加请求钩子
    * @param server Fastify实例
    */
-  private addHooks(server: FastifyInstance): void {
-    // 请求前钩子 - 添加自定义请求上下文
-    server.addHook('preHandler', async (request, _reply) => {
+    private addHooks(server: FastifyInstance): void {
+    // 使用 onRequest 钩子确保最早初始化 - 这个比 preHandler 更早执行
+    server.addHook('onRequest', async (request, _reply) => {
       const context: RequestContext = {
         requestId: request.id,
         timestamp: new Date()
@@ -128,16 +142,35 @@ export class ServerConfig {
       request.appContext = context;
     });
 
-    // 请求后钩子 - 添加响应头
+    // 请求后钩子 - 添加安全检查
     server.addHook('onSend', async (request, reply, payload) => {
       reply.header('X-Request-ID', request.id);
-      reply.header('X-Response-Time', Date.now() - request.appContext.timestamp.getTime() + 'ms');
+      
+      // 🔧 关键修复：安全检查 appContext
+      if (request.appContext && request.appContext.timestamp) {
+        const responseTime = Date.now() - request.appContext.timestamp.getTime();
+        reply.header('X-Response-Time', responseTime + 'ms');
+      } else {
+        // 后备方案
+        reply.header('X-Response-Time', '0ms');
+        console.warn(`Request ${request.id} missing appContext for ${request.method} ${request.url}`);
+      }
+      
       return payload;
     });
 
-    // 错误处理钩子
+    // 错误处理钩子保持不变...
     server.setErrorHandler(async (error, request, reply) => {
       const requestId = request.id;
+      
+      // 确保错误处理时也有 appContext
+      if (!request.appContext) {
+        request.appContext = {
+          requestId,
+          timestamp: new Date()
+        };
+      }
+      
       request.log.error({
         error: error.message,
         stack: error.stack,
@@ -147,7 +180,6 @@ export class ServerConfig {
       });
 
       const statusCode = this.getErrorStatusCode(error);
-
       const errorResponse = {
         success: false,
         error: this.getErrorMessage(error, statusCode),
@@ -161,12 +193,16 @@ export class ServerConfig {
 
     console.log('✅ 请求钩子配置完成');
   }
-
   /**
    * 获取CORS允许的源
    * @returns CORS源数组
    */
-  private getCorsOrigins(): string[] {
+  private getCorsOrigins(): string[] | boolean {
+    // 开发环境下允许所有源
+    if (process.env.NODE_ENV === 'development') {
+      return true;
+    }
+    
     const origins = process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:3000';
     return origins.split(',').map(origin => origin.trim());
   }
