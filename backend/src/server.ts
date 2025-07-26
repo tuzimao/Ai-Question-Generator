@@ -23,10 +23,11 @@ import Database from '@/utils/database';
 import { vectorService } from '@/services/VectorService';
 import { aiService } from '@/services/AIService';
 import { storageService } from '@/services/StorageService';
-import DocumentController from '@/controllers/DocumentController';
+//import DocumentController from '@/controllers/DocumentController';
 import UserModel from '@/models/User';
 import { BaseResponse, User } from '@/types/base';
 import { getErrorMessage } from '@/utils/typescript-helpers';
+import DocumentRoutes from '@/routes/DocumentRoutes';
 
 /**
  * 应用程序主类
@@ -586,7 +587,7 @@ class App {
       });
 
       // 🚀 注册文档API路由
-      await DocumentController.registerRoutes(server);
+      await DocumentRoutes.registerRoutes(server);
       console.log('✅ 文档API路由注册完成');
 
       // 404 处理

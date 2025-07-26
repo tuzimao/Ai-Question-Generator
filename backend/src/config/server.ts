@@ -3,10 +3,11 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
-import multipart from '@fastify/multipart';
+import multipart, { ajvFilePlugin }  from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import { RequestContext, User } from '@/types/base';
+
 
 /**
  * Fastify服务器配置类
@@ -24,6 +25,8 @@ export class ServerConfig {
    * @returns 配置好的Fastify实例
    */
   private createServer(): FastifyInstance {
+
+    
     // 日志配置
     const logger =
       process.env.NODE_ENV === 'development'
@@ -45,16 +48,8 @@ export class ServerConfig {
       genReqId: () => uuidv4(),
       bodyLimit: parseInt(process.env.MAX_FILE_SIZE || '52428800', 10), // 50MB
       // 🔧 配置 JSON Schema 编译器以支持额外关键字
-      ajv: {
-        customOptions: {
-          strict: false, // 关闭严格模式
-          removeAdditional: false, // 保留额外属性
-          useDefaults: true, // 使用默认值
-          allowUnionTypes: true, // 允许联合类型
-          keywords: ['example'] // 明确允许 example 关键字
-        }
-      }
-    };
+      ajv: { plugins: [ajvFilePlugin] }
+          };
 
     const server = Fastify(serverOptions);
 
@@ -113,7 +108,8 @@ export class ServerConfig {
         fileSize: parseInt(process.env.MAX_FILE_SIZE || '52428800', 10),
         files: 10
       },
-      attachFieldsToBody: false
+      // 'keyValues' = 每个字段 { value, ...extra }    （也可以用 true）
+       attachFieldsToBody: 'keyValues'
     });
 
     await server.register(rateLimit, {
