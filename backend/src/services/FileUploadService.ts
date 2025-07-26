@@ -3,7 +3,7 @@
 import crypto from 'crypto';
 import path from 'path';
 import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
+//import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { storageService } from '@/services/StorageService';
 import { getErrorMessage } from '@/utils/typescript-helpers';
@@ -96,36 +96,21 @@ export class FileUploadService {
   }
 
   /**
-   * 验证文件
+   * 验证文件（不验证大小，适用于流式处理）
    * @param filename 文件名
    * @param mimetype MIME类型
-   * @param size 文件大小
    * @param config 上传配置
    * @returns 验证结果
    */
-  public static validateFile(
+  public static validateFileWithoutSize(
     filename: string,
     mimetype: string,
-    size: number,
     config: FileUploadConfig = this.getDefaultConfig()
   ): FileValidationResult {
     try {
       // 检查文件名
       if (!filename || filename.trim() === '') {
         return { isValid: false, error: '文件名不能为空' };
-      }
-
-      // 检查文件大小
-      if (size <= 0) {
-        return { isValid: false, error: '文件大小无效' };
-      }
-
-      if (size > config.maxFileSize) {
-        const maxSizeMB = Math.round(config.maxFileSize / (1024 * 1024));
-        return { 
-          isValid: false, 
-          error: `文件大小超过限制，最大允许 ${maxSizeMB}MB` 
-        };
       }
 
       // 标准化MIME类型
@@ -163,6 +148,42 @@ export class FileUploadService {
   }
 
   /**
+   * 验证文件（包括大小验证）
+   * @param filename 文件名
+   * @param mimetype MIME类型
+   * @param size 文件大小
+   * @param config 上传配置
+   * @returns 验证结果
+   */
+  public static validateFile(
+    filename: string,
+    mimetype: string,
+    size: number,
+    config: FileUploadConfig = this.getDefaultConfig()
+  ): FileValidationResult {
+    // 先进行基础验证
+    const basicValidation = this.validateFileWithoutSize(filename, mimetype, config);
+    if (!basicValidation.isValid) {
+      return basicValidation;
+    }
+
+    // 检查文件大小
+    if (size <= 0) {
+      return { isValid: false, error: '文件大小无效' };
+    }
+
+    if (size > config.maxFileSize) {
+      const maxSizeMB = Math.round(config.maxFileSize / (1024 * 1024));
+      return { 
+        isValid: false, 
+        error: `文件大小超过限制，最大允许 ${maxSizeMB}MB` 
+      };
+    }
+
+    return basicValidation;
+  }
+
+  /**
    * 上传文件到存储服务
    * @param fileStream 文件流信息
    * @param userId 用户ID
@@ -179,23 +200,29 @@ export class FileUploadService {
     try {
       console.log(`📤 开始上传文件: ${fileStream.filename} (用户: ${userId})`);
 
-      // 验证文件基本信息
-      const validation = this.validateFile(
+      // 🔧 修复：先进行基础验证（不包括文件大小）
+      const basicValidation = this.validateFileWithoutSize(
         fileStream.filename,
         fileStream.mimetype,
-        0, // 大小稍后验证
         config
       );
 
-      if (!validation.isValid) {
-        throw new Error(validation.error);
+      if (!basicValidation.isValid) {
+        throw new Error(basicValidation.error);
       }
 
+      console.log('✅ 基础文件验证通过');
+
       // 流式读取文件内容并计算哈希
-      const { buffer, contentHash, size } = await this.processFileStream(fileStream.file);
+      const { buffer, contentHash, size } = await this.processFileStream(
+        fileStream.file,
+        config.maxFileSize
+      );
       tempBuffer = buffer;
 
-      // 验证文件大小
+      console.log(`📊 文件读取完成: ${size} 字节, 哈希: ${contentHash.substring(0, 16)}...`);
+
+      // 🔧 修复：现在验证实际的文件大小
       const sizeValidation = this.validateFile(
         fileStream.filename,
         fileStream.mimetype,
@@ -207,16 +234,19 @@ export class FileUploadService {
         throw new Error(sizeValidation.error);
       }
 
+      console.log('✅ 文件大小验证通过');
+
       // 生成存储路径
       const fileId = uuidv4();
       const ext = path.extname(fileStream.filename);
       const storagePath = this.generateStoragePath(userId, fileId, ext);
 
       // 上传到MinIO
+      console.log(`📁 上传到存储服务: ${storagePath}`);
       const uploadResult = await storageService.uploadFile(buffer, {
         bucket: config.storageBucket,
         fileName: storagePath,
-        contentType: validation.normalizedMimeType!,
+        contentType: basicValidation.normalizedMimeType!,
         metadata: {
           'original-name': fileStream.filename,
           'user-id': userId,
@@ -231,7 +261,7 @@ export class FileUploadService {
       return {
         fileId,
         originalName: fileStream.filename,
-        mimeType: validation.normalizedMimeType!,
+        mimeType: basicValidation.normalizedMimeType!,
         size,
         contentHash,
         storagePath,
@@ -251,11 +281,15 @@ export class FileUploadService {
   }
 
   /**
-   * 流式处理文件并计算哈希
+   * 流式处理文件并计算哈希（带大小限制）
    * @param fileStream 文件流
+   * @param maxFileSize 最大文件大小
    * @returns 文件缓冲区、哈希值和大小
    */
-  private static async processFileStream(fileStream: Readable): Promise<{
+  private static async processFileStream(
+    fileStream: Readable, 
+    maxFileSize: number = this.DEFAULT_MAX_FILE_SIZE
+  ): Promise<{
     buffer: Buffer;
     contentHash: string;
     size: number;
@@ -265,14 +299,24 @@ export class FileUploadService {
       const hash = crypto.createHash('sha256');
       let size = 0;
 
+      // 设置超时
+      const timeout = setTimeout(() => {
+        reject(new Error('文件读取超时'));
+      }, 300000); // 5分钟超时
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+      };
+
       fileStream.on('data', (chunk: Buffer) => {
         chunks.push(chunk);
         hash.update(chunk);
         size += chunk.length;
 
-        // 实时检查文件大小，防止内存溢出
-        if (size > this.DEFAULT_MAX_FILE_SIZE) {
-          reject(new Error(`文件过大，超过 ${Math.round(this.DEFAULT_MAX_FILE_SIZE / (1024 * 1024))}MB 限制`));
+        // 🔧 修复：实时检查文件大小，防止内存溢出
+        if (size > maxFileSize) {
+          cleanup();
+          reject(new Error(`文件过大，超过 ${Math.round(maxFileSize / (1024 * 1024))}MB 限制`));
           return;
         }
       });
@@ -281,23 +325,18 @@ export class FileUploadService {
         try {
           const buffer = Buffer.concat(chunks);
           const contentHash = hash.digest('hex');
+          cleanup();
           resolve({ buffer, contentHash, size });
         } catch (error) {
+          cleanup();
           reject(error);
         }
       });
 
       fileStream.on('error', (error) => {
+        cleanup();
         reject(error);
       });
-
-      // 设置超时
-      const timeout = setTimeout(() => {
-        reject(new Error('文件上传超时'));
-      }, 300000); // 5分钟超时
-
-      fileStream.on('end', () => clearTimeout(timeout));
-      fileStream.on('error', () => clearTimeout(timeout));
     });
   }
 

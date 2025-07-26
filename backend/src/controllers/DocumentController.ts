@@ -1,4 +1,4 @@
-// src/controllers/DocumentController.ts
+// src/controllers/DocumentController.ts - 使用原生流式API
 
 import { FastifyRequest, FastifyReply } from 'fastify';
 import DocumentService, {
@@ -42,14 +42,55 @@ export class DocumentController {
         } as any;
       }
 
-      // 获取上传的文件
-      const { file } = request.body as any;
+      // 🔧 使用 Fastify 原生流式 API 处理 multipart 数据
+      console.log('📋 开始解析 multipart 数据...');
       
-      if (!file) {
+      const parts = await (request as any).files();
+      const fields: Record<string, string> = {};
+      let fileObject: any = null;
+
+      console.log('📋 处理 multipart parts...');
+
+      // 遍历所有 parts（文件和字段）
+      for await (const part of parts) {
+        console.log(`📋 处理 part: ${part.fieldname}, 类型: ${part.type}`);
+        
+        if (part.type === 'file') {
+          // 这是文件
+          console.log('📁 找到文件 part:', {
+            fieldname: part.fieldname,
+            filename: part.filename,
+            mimetype: part.mimetype,
+            encoding: part.encoding
+          });
+
+          if (part.fieldname === 'file' || !fileObject) {
+            fileObject = part;
+            console.log('✅ 使用此文件作为主文件');
+          } else {
+            // 跳过额外的文件
+            console.log('⏭️ 跳过额外文件');
+            await part.file.resume(); // 消费流以避免内存泄漏
+          }
+        } else {
+          // 这是普通字段
+          console.log(`📝 处理字段: ${part.fieldname}`);
+          const value = await part.value;
+          fields[part.fieldname] = value;
+          console.log(`📝 字段值: ${part.fieldname} = ${value.substring(0, 100)}${value.length > 100 ? '...' : ''}`);
+        }
+      }
+
+      console.log('📋 解析完成，字段数量:', Object.keys(fields).length);
+      console.log('📋 字段名称:', Object.keys(fields));
+
+      // 验证是否找到文件
+      if (!fileObject) {
+        console.log('❌ 未找到文件');
         const response: BaseResponse = {
           success: false,
           error: '未提供文件',
-          message: '请选择要上传的文件',
+          message: '请选择要上传的文件（字段名：file）',
           timestamp: new Date().toISOString(),
           requestId: request.id
         };
@@ -57,29 +98,53 @@ export class DocumentController {
         return;
       }
 
+      // 验证文件信息
+      if (!fileObject.filename) {
+        console.log('❌ 文件缺少文件名');
+        await fileObject.file.resume(); // 清理流
+        const response: BaseResponse = {
+          success: false,
+          error: '文件缺少文件名',
+          message: '上传的文件必须包含文件名信息',
+          timestamp: new Date().toISOString(),
+          requestId: request.id
+        };
+        reply.status(400).send(response);
+        return;
+      }
+
+      console.log('✅ 文件信息验证通过:', {
+        filename: fileObject.filename,
+        mimetype: fileObject.mimetype,
+        fieldname: fileObject.fieldname,
+        encoding: fileObject.encoding
+      });
+
       // 解析可选参数
       let metadata: Record<string, any> = {};
       let parseConfig: Record<string, any> = {};
       let chunkConfig: Record<string, any> = {};
 
       try {
-        // 从 multipart 数据中解析字段
-        const fields = await this.extractMultipartFields(request);
-        
         if (fields.metadata) {
           metadata = JSON.parse(fields.metadata);
+          console.log('✅ 解析 metadata 成功，键数量:', Object.keys(metadata).length);
         }
         if (fields.parseConfig) {
           parseConfig = JSON.parse(fields.parseConfig);
+          console.log('✅ 解析 parseConfig 成功，键数量:', Object.keys(parseConfig).length);
         }
         if (fields.chunkConfig) {
           chunkConfig = JSON.parse(fields.chunkConfig);
+          console.log('✅ 解析 chunkConfig 成功，键数量:', Object.keys(chunkConfig).length);
         }
       } catch (error) {
+        console.log('❌ JSON 解析失败:', error);
+        await fileObject.file.resume(); // 清理流
         const response: BaseResponse = {
           success: false,
           error: '参数格式错误',
-          message: 'metadata、parseConfig、chunkConfig 必须是有效的JSON格式',
+          message: `JSON 格式无效: ${getErrorMessage(error)}`,
           timestamp: new Date().toISOString(),
           requestId: request.id
         };
@@ -89,15 +154,40 @@ export class DocumentController {
 
       // 构建文件流信息
       const fileStreamInfo: FileStreamInfo = {
-        filename: file.filename,
-        mimetype: file.mimetype,
-        encoding: file.encoding,
-        fieldname: file.fieldname,
-        file: file.file
+        filename: fileObject.filename,
+        mimetype: fileObject.mimetype || 'application/octet-stream',
+        encoding: fileObject.encoding || 'binary',
+        fieldname: fileObject.fieldname || 'file',
+        file: fileObject.file // 这是原生的文件流
       };
 
-      // 上传文件到存储服务
-      console.log(`📁 开始处理文件: ${file.filename} (${file.mimetype})`);
+      console.log(`📁 开始处理文件: ${fileObject.filename} (${fileObject.mimetype})`);
+      console.log(`📋 元数据字段数量: ${Object.keys(metadata).length}`);
+
+      // 🔧 修复：使用新的基础验证方法（不验证文件大小）
+      const basicValidation = FileUploadService.validateFileWithoutSize(
+        fileStreamInfo.filename,
+        fileStreamInfo.mimetype,
+        FileUploadService.getDefaultConfig()
+      );
+
+      if (!basicValidation.isValid) {
+        console.log('❌ 基础文件验证失败:', basicValidation.error);
+        await fileObject.file.resume(); // 清理流
+        const response: BaseResponse = {
+          success: false,
+          error: '文件验证失败',
+          message: basicValidation.error || '文件格式不支持',
+          timestamp: new Date().toISOString(),
+          requestId: request.id
+        };
+        reply.status(400).send(response);
+        return;
+      }
+
+      console.log('✅ 基础文件验证通过，开始上传...');
+
+      // 上传文件到存储服务（文件大小验证在内部进行）
       const uploadResult = await FileUploadService.uploadFile(
         fileStreamInfo,
         request.appUser.id
@@ -536,28 +626,6 @@ export class DocumentController {
       };
       reply.status(statusCode).send(response);
     }
-  }
-
-  /**
-   * 从 multipart 请求中提取字段
-   * @param request FastifyRequest 对象
-   * @returns 提取的字段
-   */
-  private static async extractMultipartFields(request: FastifyRequest): Promise<Record<string, string>> {
-    const fields: Record<string, string> = {};
-    
-    // Fastify multipart 插件会将非文件字段添加到 request.body 中
-    // 但由于我们移除了 body schema，需要手动处理
-    if (request.body && typeof request.body === 'object') {
-      const body = request.body as any;
-      Object.keys(body).forEach(key => {
-        if (typeof body[key] === 'string') {
-          fields[key] = body[key];
-        }
-      });
-    }
-    
-    return fields;
   }
 }
 

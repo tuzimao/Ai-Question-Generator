@@ -21,14 +21,39 @@ export class DocumentRoutes {
         summary: '上传PDF、Markdown或文本文件',
         tags: ['Documents'],
         security: [{ bearerAuth: [] }],
-        // 🔧 关键修复：使用 OpenAPI 3.0 的 requestBody 而不是 body
-          body: {
-          type: 'object',
-          required: ['file'],
-          properties: {
-            file: { isFile: true },          // ⬅︎ 关键
-            filename: { type: 'string' },
-            metadata: { type: 'string' }
+        // 🔧 关键修复：移除 body schema，让 multipart 插件处理
+        consumes: ['multipart/form-data'],
+        // 使用 Swagger 的 requestBody 格式而不是 Fastify 的 body schema
+        requestBody: {
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: {
+                  file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: '要上传的文档文件（PDF、Markdown或文本文件）'
+                  },
+                  metadata: {
+                    type: 'string',
+                    description: '文档元数据（JSON字符串）',
+                    example: '{"title":"示例文档","tags":["标签1","标签2"]}'
+                  },
+                  parseConfig: {
+                    type: 'string',
+                    description: '解析配置（JSON字符串）',
+                    example: '{"extractImages":true,"preserveFormatting":false}'
+                  },
+                  chunkConfig: {
+                    type: 'string',
+                    description: '分块配置（JSON字符串）',
+                    example: '{"chunkSize":1000,"overlap":100}'
+                  }
+                }
+              }
+            }
           }
         },
         response: {

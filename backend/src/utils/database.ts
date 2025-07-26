@@ -1,4 +1,4 @@
-// src/utils/database.ts (修复版本)
+// src/utils/database.ts (修复版本) - 方案1：修复Proxy实现
 
 import knex, { Knex } from 'knex';
 import { DatabaseConfig } from '@/config/database';
@@ -127,7 +127,7 @@ export class Database {
    * @param operation 数据库操作函数
    * @returns 操作结果
    */
-  public static async transaction<T>(
+  public static async withTransaction<T>(
     operation: (trx: Knex.Transaction) => Promise<T>
   ): Promise<T> {
     const db = this.getInstance();
@@ -135,13 +135,22 @@ export class Database {
     return await db.transaction(async (trx) => {
       try {
         const result = await operation(trx);
-        await trx.commit();
-        return result;
+        return result; // Knex会自动commit
       } catch (error) {
-        await trx.rollback();
-        throw error;
+        throw error; // Knex会自动rollback
       }
     });
+  }
+
+  /**
+   * 🔧 向后兼容：transaction 方法的别名
+   * @param operation 数据库操作函数
+   * @returns 操作结果
+   */
+  public static async transaction<T>(
+    operation: (trx: Knex.Transaction) => Promise<T>
+  ): Promise<T> {
+    return this.withTransaction(operation);
   }
 
   /**
@@ -257,7 +266,7 @@ export class Database {
   }
 }
 
-// ⚠️ 修复：延迟初始化数据库实例，避免在模块加载时立即执行
+// 🔧 修复：延迟初始化数据库实例，避免在模块加载时立即执行
 let dbInstance: Knex | null = null;
 
 /**
@@ -271,14 +280,21 @@ export function getDatabase(): Knex {
   return dbInstance;
 }
 
-// 导出数据库实例的快捷方式（延迟初始化）
-export const db = new Proxy({} as Knex, {
+// 🔧 修复：完全重新实现 db 导出，支持函数调用
+export const db = new Proxy((() => {}) as any, {
+  // 拦截函数调用：db('table_name')
+  apply(_target, _thisArg, argArray) {
+    const instance = getDatabase();
+    return instance(...argArray);
+  },
+  
+  // 拦截属性访问：db.raw, db.schema 等
   get(_target, prop) {
     const instance = getDatabase();
     const value = instance[prop as keyof Knex];
     return typeof value === 'function' ? value.bind(instance) : value;
   }
-});
+}) as Knex;
 
 // 默认导出Database类
 export default Database;

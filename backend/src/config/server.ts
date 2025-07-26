@@ -109,7 +109,7 @@ export class ServerConfig {
         files: 10
       },
       // 'keyValues' = 每个字段 { value, ...extra }    （也可以用 true）
-       attachFieldsToBody: 'keyValues'
+       //attachFieldsToBody: 'keyValues'
     });
 
     await server.register(rateLimit, {
