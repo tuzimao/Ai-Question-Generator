@@ -24,7 +24,7 @@ export class DatabaseConfig {
         password: process.env.DB_PASSWORD || '',
         database: process.env.DB_NAME || 'ai_question_generator',
         charset: 'utf8mb4', // 支持emoji和特殊字符
-        timezone: '+08:00' // 设置时区为北京时间
+        //timezone: '+08:00' // 设置时区为北京时间
       },
       pool: {
         min: 2,  // 最小连接数

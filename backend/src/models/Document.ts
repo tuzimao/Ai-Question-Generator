@@ -165,18 +165,21 @@ export class DocumentModel {
         storage_path: docData.storage_path,
         storage_bucket: docData.storage_bucket || 'documents',
         ingest_status: DocumentIngestStatus.UPLOADED,
-        metadata: docData.metadata ? JSON.stringify(docData.metadata) : null,
-        parse_config: docData.parse_config ? JSON.stringify(docData.parse_config) : null,
-        chunk_config: docData.chunk_config ? JSON.stringify(docData.chunk_config) : null,
+         metadata: this.prepareJSONField(docData.metadata),
+        parse_config: this.prepareJSONField(docData.parse_config),
+        chunk_config: this.prepareJSONField(docData.chunk_config),
         created_at: new Date(),
         updated_at: new Date()
       };
+
+      
+
 
       // 插入文档记录
       await dbInstance(this.TABLE_NAME).insert(documentRecord);
 
       // 返回创建的文档信息
-      const createdDoc = await this.findById(docId);
+      const createdDoc = await this.findByIdWithTransaction(docId, dbInstance);
       if (!createdDoc) {
         throw new Error('文档创建失败');
       }
@@ -187,6 +190,22 @@ export class DocumentModel {
       throw error;
     }
   }
+
+/**
+ * 🔧 新增：安全准备JSON字段用于数据库插入
+ * @param value 要存储的值
+ * @returns 适合数据库存储的值
+ */
+private static prepareJSONField(value: any): any {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  
+  // 如果数据库字段类型是JSON，可以直接传入对象
+  // 如果是TEXT字段，需要序列化
+  // 这里我们先尝试直接传入对象，如果失败再改为字符串
+  return value;
+}
 
   /**
    * 根据ID查找文档
@@ -213,6 +232,60 @@ export class DocumentModel {
       throw error;
     }
   }
+
+
+  /**
+   * 应用查询选项到查询构建器
+   * @param query 查询构建器
+   * @param options 查询选项
+   * @returns 更新后的查询构建器
+   */
+private static async findByIdWithTransaction(
+  docId: string,
+  dbInstance: Knex | Knex.Transaction,
+  options: DocumentQueryOptions = {}
+): Promise<Document | null> {
+  try {
+    let query = dbInstance(this.TABLE_NAME)
+      .where('doc_id', docId);
+
+    // 应用查询选项（但不使用全局 db 实例）
+    if (!options.includeDeleted) {
+      query = query.whereNull('deleted_at');
+    }
+
+    if (options.status) {
+      query = query.where('ingest_status', options.status);
+    }
+
+    if (options.mimeType) {
+      query = query.where('mime_type', options.mimeType);
+    }
+
+    if (options.userId) {
+      query = query.where('user_id', options.userId);
+    }
+
+    if (options.language) {
+      query = query.where('language', options.language);
+    }
+
+    if (options.minSize !== undefined) {
+      query = query.where('size_bytes', '>=', options.minSize);
+    }
+    if (options.maxSize !== undefined) {
+      query = query.where('size_bytes', '<=', options.maxSize);
+    }
+
+    const doc = await query.first();
+    if (!doc) return null;
+
+    return this.formatDocument(doc);
+  } catch (error) {
+    console.error('查找文档失败:', error);
+    throw error;
+  }
+}
 
   /**
    * 根据用户ID和内容哈希查找文档
@@ -570,10 +643,10 @@ export class DocumentModel {
   private static formatDocument(doc: any): Document {
     return {
       ...doc,
-      // 解析JSON字段
-      metadata: doc.metadata ? JSON.parse(doc.metadata) : undefined,
-      parse_config: doc.parse_config ? JSON.parse(doc.parse_config) : undefined,
-      chunk_config: doc.chunk_config ? JSON.parse(doc.chunk_config) : undefined,
+      // 🔧 修复：安全解析JSON字段，处理MySQL JSON类型自动解析的情况
+      metadata: this.safeParseJSON(doc.metadata),
+      parse_config: this.safeParseJSON(doc.parse_config),
+      chunk_config: this.safeParseJSON(doc.chunk_config),
       // 确保数字类型
       size_bytes: Number(doc.size_bytes),
       page_count: doc.page_count ? Number(doc.page_count) : undefined,
@@ -581,6 +654,37 @@ export class DocumentModel {
       token_estimate: doc.token_estimate ? Number(doc.token_estimate) : undefined
     };
   }
+
+  /**
+ * 🔧 新增：安全解析JSON字段
+ * @param value 可能是字符串、对象或null的值
+ * @returns 解析后的对象或undefined
+ */
+private static safeParseJSON(value: any): any {
+  // 如果是null或undefined，返回undefined
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  
+  // 如果已经是对象，直接返回（MySQL JSON字段会自动解析）
+  if (typeof value === 'object') {
+    return value;
+  }
+  
+  // 如果是字符串，尝试解析
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      console.warn('JSON解析失败:', { value, error: (error as Error).message });
+      return undefined;
+    }
+  }
+  
+  // 其他类型直接返回
+  return value;
+}
+  
 }
 
 // 导出文档模型类

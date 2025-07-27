@@ -30,7 +30,7 @@ export class DocumentController {
       if (!request.appUser) {
         console.log('🚧 测试模式：创建默认用户');
         request.appUser = {
-          id: 'test-user-' + Date.now(),
+          id: 'test-user-dev',
           email: 'test@example.com',
           username: 'testuser',
           display_name: 'Test User',
