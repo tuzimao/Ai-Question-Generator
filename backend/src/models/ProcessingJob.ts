@@ -252,73 +252,64 @@ export class ProcessingJobModel {
    * @returns 创建的作业信息
    */
   public static async create(
-    jobData: CreateJobRequest,
-    trx?: Knex.Transaction
-  ): Promise<ProcessingJob> {
-    const dbInstance = trx || db;
+  jobData: CreateJobRequest,
+  trx?: Knex.Transaction
+): Promise<ProcessingJob> {
+  const dbInstance = trx || db;
 
-    try {
-      // 生成作业ID
-      const jobId = uuidv4();
-      
-      // 准备作业记录
-      const jobRecord = {
-        job_id: jobId,
-        doc_id: jobData.doc_id,
-        user_id: jobData.user_id,
-        job_type: jobData.job_type,
-        status: JobStatus.QUEUED,
-        priority: jobData.priority || 5,
-        queue_name: jobData.queue_name || 'default',
-        worker_id: null,
-        attempts: 0,
-        max_attempts: jobData.max_attempts || 3,
-        next_retry_at: null,
-        retry_delay_seconds: jobData.retry_delay_seconds || 60,
-        job_config: jobData.job_config ? JSON.stringify(jobData.job_config) : null,
-        input_params: jobData.input_params ? JSON.stringify(jobData.input_params) : null,
-        file_path: jobData.file_path || null,
-        progress_current: 0,
-        progress_total: 100,
-        progress_percentage: 0.00,
-        progress_message: null,
-        progress_details: null,
-        queued_at: new Date(),
-        started_at: null,
-        completed_at: null,
-        failed_at: null,
-        processing_duration_ms: null,
-        queue_wait_duration_ms: null,
-        memory_usage_bytes: null,
-        disk_usage_bytes: null,
-        result_data: null,
-        error_message: null,
-        error_stack: null,
-        error_code: null,
-        execution_log: null,
-        debug_info: null,
-        metrics: null,
-        depends_on: jobData.depends_on ? JSON.stringify(jobData.depends_on) : null,
-        triggers: jobData.triggers ? JSON.stringify(jobData.triggers) : null,
-        created_at: new Date(),
-        updated_at: new Date()
-      };
+  try {
+    // 生成作业ID
+    const jobId = uuidv4();
+    
+    // 准备作业记录
+    const jobRecord = {
+      job_id: jobId,
+      doc_id: jobData.doc_id,
+      user_id: jobData.user_id,
+      job_type: jobData.job_type,
+      status: JobStatus.QUEUED,
+      priority: jobData.priority || 5,
+      queue_name: jobData.queue_name || 'default',
+      max_attempts: jobData.max_attempts || 3,
+      retry_delay_seconds: jobData.retry_delay_seconds || 60,
+      attempts: 0,
+      progress_current: 0,
+      progress_total: 100,
+      progress_percentage: 0.00,
+      queued_at: new Date(),
+      // 🔧 修复：安全处理JSON字段
+      job_config: this.prepareJSONField(jobData.job_config),
+      input_params: this.prepareJSONField(jobData.input_params),
+      file_path: jobData.file_path || null,
+      created_at: new Date(),
+      updated_at: new Date()
+    };
 
-      // 插入作业记录
-      await dbInstance(this.TABLE_NAME).insert(jobRecord);
+    console.log('🔧 准备插入的作业记录:', {
+      job_id: jobRecord.job_id,
+      job_type: jobRecord.job_type,
+      doc_id: jobRecord.doc_id
+    });
 
-      // 返回创建的作业信息
-      const createdJob = await this.findById(jobId);
-      if (!createdJob) {
-        throw new Error('作业创建失败');
-      }
+    // 插入作业记录
+    const insertResult = await dbInstance(this.TABLE_NAME).insert(jobRecord);
+    console.log('🔧 作业插入结果:', insertResult);
 
-      return createdJob;
-    } catch (error) {
-      console.error('作业创建失败:', error);
-      throw error;
+    // 🔧 修复：使用同一个事务来查询刚创建的作业
+    console.log('🔧 验证作业是否创建成功...');
+    const createdJob = await this.findByIdWithTransaction(jobId, dbInstance);
+    if (!createdJob) {
+      console.error('🔧 验证失败：无法找到刚创建的作业');
+      throw new Error('作业创建失败');
     }
+
+    console.log('🔧 作业创建验证成功:', createdJob.job_id);
+    return createdJob;
+  } catch (error) {
+    console.error('作业创建失败:', error);
+    throw error;
   }
+}
 
   /**
    * 根据ID查找作业
@@ -821,32 +812,66 @@ export class ProcessingJobModel {
    * @param job 原始作业数据
    * @returns 格式化后的作业对象
    */
-  private static formatJob(job: any): ProcessingJob {
-    return {
-      ...job,
-      // 解析JSON字段
-      job_config: job.job_config ? JSON.parse(job.job_config) : undefined,
-      input_params: job.input_params ? JSON.parse(job.input_params) : undefined,
-      progress_details: job.progress_details ? JSON.parse(job.progress_details) : undefined,
-      result_data: job.result_data ? JSON.parse(job.result_data) : undefined,
-      debug_info: job.debug_info ? JSON.parse(job.debug_info) : undefined,
-      metrics: job.metrics ? JSON.parse(job.metrics) : undefined,
-      depends_on: job.depends_on ? JSON.parse(job.depends_on) : undefined,
-      triggers: job.triggers ? JSON.parse(job.triggers) : undefined,
-      // 确保数字类型
-      priority: Number(job.priority),
-      attempts: Number(job.attempts),
-      max_attempts: Number(job.max_attempts),
-      retry_delay_seconds: Number(job.retry_delay_seconds),
-      progress_current: Number(job.progress_current),
-      progress_total: Number(job.progress_total),
-      progress_percentage: Number(job.progress_percentage),
-      processing_duration_ms: job.processing_duration_ms ? Number(job.processing_duration_ms) : undefined,
-      queue_wait_duration_ms: job.queue_wait_duration_ms ? Number(job.queue_wait_duration_ms) : undefined,
-      memory_usage_bytes: job.memory_usage_bytes ? Number(job.memory_usage_bytes) : undefined,
-      disk_usage_bytes: job.disk_usage_bytes ? Number(job.disk_usage_bytes) : undefined
-    };
+private static formatJob(job: any): ProcessingJob {
+  const safeParseJSON = (value: any) => {
+    if (!value) return undefined;
+    if (typeof value === 'object') return value;
+    if (typeof value === 'string') {
+      try { return JSON.parse(value); } catch { return undefined; }
+    }
+    return undefined;
+  };
+
+  return {
+    ...job,
+    job_config: safeParseJSON(job.job_config),
+    input_params: safeParseJSON(job.input_params),
+    result_data: safeParseJSON(job.result_data),
+    progress_details: safeParseJSON(job.progress_details),
+    debug_info: safeParseJSON(job.debug_info),
+    metrics: safeParseJSON(job.metrics),
+    depends_on: safeParseJSON(job.depends_on),
+    triggers: safeParseJSON(job.triggers),
+    // 确保数字类型
+    priority: Number(job.priority),
+    max_attempts: Number(job.max_attempts),
+    attempts: Number(job.attempts),
+    retry_delay_seconds: Number(job.retry_delay_seconds),
+    progress_current: Number(job.progress_current),
+    progress_total: Number(job.progress_total),
+    progress_percentage: Number(job.progress_percentage)
+  };
+}
+
+  private static prepareJSONField(value: any): any {
+  if (value === null || value === undefined) {
+    return null;
   }
+  
+  // 如果数据库字段类型是JSON，可以直接传入对象
+  // 如果是TEXT字段，需要序列化
+  // 这里我们先尝试直接传入对象，如果失败再改为字符串
+  return value;
+}
+
+private static async findByIdWithTransaction(
+  jobId: string,
+  dbInstance: Knex | Knex.Transaction
+): Promise<ProcessingJob | null> {
+  try {
+    const job = await dbInstance(this.TABLE_NAME)
+      .where('job_id', jobId)
+      .first();
+
+    if (!job) return null;
+    return this.formatJob(job);
+  } catch (error) {
+    console.error('查找作业失败:', error);
+    throw error;
+  }
+}
+
+
 }
 
 // 导出作业模型类

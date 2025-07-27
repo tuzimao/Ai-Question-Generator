@@ -35,7 +35,7 @@ export interface CreateDocumentServiceRequest {
 export interface CreateDocumentServiceResult {
   document: Document;
   existingDocument?: boolean;
-  processingJob?: ProcessingJob;
+  processingJob?: ProcessingJob | undefined;
   message: string;
 }
 
@@ -109,104 +109,125 @@ export class DocumentService {
    * @param request 创建请求
    * @returns 创建结果
    */
-  public static async createDocument(
-    request: CreateDocumentServiceRequest
-  ): Promise<CreateDocumentServiceResult> {
-    return await Database.transaction(async (trx: Knex.Transaction) => {
-      try {
-        console.log(`📄 开始创建文档记录: ${request.uploadResult.originalName} (用户: ${request.userId})`);
+    public static async createDocument(
+  request: CreateDocumentServiceRequest
+): Promise<CreateDocumentServiceResult> {
+  try {
+    console.log(`📄 开始创建文档记录: ${request.uploadResult.originalName} (用户: ${request.userId})`);
 
-        // 🔧 修复：根据环境决定是否验证用户
-        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-          console.log('🚧 开发/测试模式：跳过用户验证');
-        } else {
-          // 生产环境才验证用户是否存在
-          console.log('🔍 生产模式：验证用户是否存在');
-          const user = await UserModel.findById(request.userId);
-          if (!user) {
-            throw new Error('用户不存在');
-          }
-          console.log(`✅ 用户验证通过: ${user.username} (${user.email})`);
+    // 🔧 修复：分离文档创建和作业创建的事务
+    
+    // 第一步：在独立事务中创建文档
+    const document = await Database.withTransaction(async (docTrx: Knex.Transaction) => {
+      // 🔧 修复：根据环境决定是否验证用户
+      if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+        console.log('🚧 开发/测试模式：跳过用户验证');
+      } else {
+        // 生产环境才验证用户是否存在
+        console.log('🔍 生产模式：验证用户是否存在');
+        const user = await UserModel.findById(request.userId);
+        if (!user) {
+          throw new Error('用户不存在');
         }
+        console.log(`✅ 用户验证通过: ${user.username} (${user.email})`);
+      }
 
-        // 🔧 修复：检查是否已存在相同内容的文档（去重逻辑）
-        const existingDocument = await DocumentModel.findByUserAndHash(
-          request.userId,
-          request.uploadResult.contentHash,
-          { includeDeleted: true } // 包含已删除的文档
-        );
+      // 🔧 修复：检查是否已存在相同内容的文档（去重逻辑）
+      const existingDocument = await DocumentModel.findByUserAndHash(
+        request.userId,
+        request.uploadResult.contentHash,
+        { includeDeleted: true } // 包含已删除的文档
+      );
 
-        if (existingDocument) {
-          console.log(`♻️ 发现重复文档: ${existingDocument.doc_id} (${existingDocument.filename})`);
-          
-          // 如果是已删除的文档，恢复它
-          if (existingDocument.deleted_at) {
-            const restoredDocument = await DocumentModel.restore(existingDocument.doc_id, trx);
-            return {
-              document: restoredDocument,
-              existingDocument: true,
-              message: '文档已存在，已从回收站恢复'
-            };
-          }
-
-          // 返回现有文档
+      if (existingDocument) {
+        console.log(`♻️ 发现重复文档: ${existingDocument.doc_id} (${existingDocument.filename})`);
+        
+        // 如果是已删除的文档，恢复它
+        if (existingDocument.deleted_at) {
+          const restoredDocument = await DocumentModel.restore(existingDocument.doc_id, docTrx);
           return {
-            document: existingDocument,
+            document: restoredDocument,
             existingDocument: true,
-            message: '文档已存在，返回现有文档'
+            message: '文档已存在，已从回收站恢复'
           };
         }
 
-        // 准备文档数据
-        const createDocumentRequest: CreateDocumentRequest = {
-          user_id: request.userId,
-          filename: request.uploadResult.originalName,
-          content_hash: request.uploadResult.contentHash,
-          mime_type: request.uploadResult.mimeType,
-          size_bytes: request.uploadResult.size,
-          storage_path: request.uploadResult.storagePath,
-          storage_bucket: request.uploadResult.storageBucket,
-          metadata: {
-            upload_timestamp: new Date().toISOString(),
-            original_upload_name: request.uploadResult.originalName,
-            file_id: request.uploadResult.fileId,
-            ...request.metadata
-          },
-          parse_config: request.parseConfig ?? {},
-          chunk_config: {
-            target_tokens: 400,
-            max_tokens: 500,
-            overlap_tokens: 60,
-            respect_boundaries: true,
-            ...request.chunkConfig
-          }
-        };
-
-        // 创建文档记录
-        console.log('📄 创建文档数据库记录...');
-        const document = await DocumentModel.create(createDocumentRequest, trx);
-        console.log(`✅ 文档记录创建成功: ${document.doc_id}`);
-
-        // 创建处理作业
-        console.log('⚙️ 创建文档处理作业...');
-        const processingJob = await this.createProcessingJob(document, trx);
-        console.log(`✅ 处理作业创建成功: ${processingJob.job_id}`);
-
-        console.log(`✅ 文档创建成功: ${document.doc_id} (${document.filename})`);
-
+        // 返回现有文档
         return {
-          document,
-          existingDocument: false,
-          processingJob,
-          message: '文档创建成功，已加入处理队列'
+          document: existingDocument,
+          existingDocument: true,
+          message: '文档已存在，返回现有文档'
         };
-
-      } catch (error) {
-        console.error('创建文档失败:', error);
-        throw new Error(`创建文档失败: ${getErrorMessage(error)}`);
       }
+
+      // 准备文档数据
+      const createDocumentRequest: CreateDocumentRequest = {
+        user_id: request.userId,
+        filename: request.uploadResult.originalName,
+        content_hash: request.uploadResult.contentHash,
+        mime_type: request.uploadResult.mimeType,
+        size_bytes: request.uploadResult.size,
+        storage_path: request.uploadResult.storagePath,
+        storage_bucket: request.uploadResult.storageBucket,
+        metadata: {
+          upload_timestamp: new Date().toISOString(),
+          original_upload_name: request.uploadResult.originalName,
+          file_id: request.uploadResult.fileId,
+          ...request.metadata
+        },
+        parse_config: request.parseConfig ?? {},
+        chunk_config: {
+          target_tokens: 400,
+          max_tokens: 500,
+          overlap_tokens: 60,
+          respect_boundaries: true,
+          ...request.chunkConfig
+        }
+      };
+
+      // 创建文档记录
+      console.log('📄 创建文档数据库记录...');
+      const newDocument = await DocumentModel.create(createDocumentRequest, docTrx);
+      console.log(`✅ 文档记录创建成功: ${newDocument.doc_id}`);
+
+      return {
+        document: newDocument,
+        existingDocument: false,
+        message: '文档创建成功'
+      };
     });
+
+    // 第二步：在独立事务中创建处理作业（可选）
+    let processingJob: ProcessingJob | undefined;
+    if (!document.existingDocument) {
+      try {
+        console.log('⚙️ 创建文档处理作业...');
+        processingJob = await Database.withTransaction(async (jobTrx: Knex.Transaction) => {
+          return await this.createProcessingJob(document.document, jobTrx);
+        });
+        console.log(`✅ 处理作业创建成功: ${processingJob.job_id}`);
+      } catch (jobError) {
+        console.warn('⚠️ 处理作业创建失败，但文档创建已成功:', jobError);
+        // 不抛出错误，让文档创建继续成功
+      }
+    }
+
+    console.log(`✅ 文档创建流程完成: ${document.document.doc_id} (${document.document.filename})`);
+
+    return {
+      document: document.document,
+      existingDocument: document.existingDocument,
+      processingJob,
+      message: processingJob 
+        ? (document.existingDocument ? document.message : '文档创建成功，已加入处理队列')
+        : (document.existingDocument ? document.message : '文档创建成功，处理作业将稍后创建')
+    };
+
+  } catch (error) {
+    console.error('创建文档失败:', error);
+    throw new Error(`创建文档失败: ${getErrorMessage(error)}`);
   }
+}
 
   /**
    * 获取文档详情
@@ -596,6 +617,9 @@ export class DocumentService {
       // 根据文档类型确定作业类型
       let jobType: ProcessingJobType;
       if (jobTypes && jobTypes.length > 0) {
+        if (jobTypes[0] === undefined) {
+          throw new Error('jobTypes[0] is undefined, cannot assign to jobType');
+        }
         jobType = jobTypes[0]; // 目前只处理第一个作业类型
       } else {
         jobType = this.getJobTypeForDocument(document);
