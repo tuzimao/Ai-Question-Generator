@@ -1,7 +1,7 @@
 // src/workers/WorkerBootstrap.ts - Worker启动引导程序
 
 import { WorkerManager } from './WorkerManager';
-import { WorkerConfiguration } from '@/config/worker';
+//import { WorkerConfiguration } from '@/config/worker';
 import { Database } from '@/utils/database';
 import { WorkerRegistry } from './WorkerRegistry';
 

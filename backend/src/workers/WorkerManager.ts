@@ -3,7 +3,7 @@
 import { EventEmitter } from 'events';
 import { BaseWorker } from './BaseWorker';
 import { 
-  WorkerConfig, 
+  //WorkerConfig, 
   WorkerState, 
   WorkerStats, 
   SystemHealth,
@@ -368,7 +368,7 @@ export class WorkerManager extends EventEmitter {
   private getSystemLoad(): { cpu: number; memory: number; disk: number } {
     try {
       const os = require('os');
-      const process = require('process');
+     // const process = require('process');
       
       // CPU负载（简化）
       const cpuLoad = os.loadavg()[0] / os.cpus().length;

@@ -1,4 +1,4 @@
-// src/scripts/start-workers.ts - Worker启动脚本
+// scripts/start-workers.ts - Worker启动脚本
 
 import { workerBootstrap } from '../src/workers/WorkerBootstrap';
 
@@ -29,8 +29,20 @@ async function startWorkerService() {
       process.exit(0);
     });
 
+    process.on('SIGTERM', async () => {
+      console.log('\n📢 接收到终止信号，开始优雅关闭...');
+      await workerBootstrap.stopWorkers();
+      process.exit(0);
+    });
+
   } catch (error) {
     console.error('❌ Worker服务启动失败:', error);
+    if (error instanceof Error) {
+      console.error('错误详情:', error.message);
+      if (error.stack) {
+        console.error('堆栈信息:', error.stack);
+      }
+    }
     process.exit(1);
   }
 }

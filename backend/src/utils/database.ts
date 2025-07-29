@@ -1,100 +1,223 @@
-// src/utils/database.ts (修复版本) - 方案1：修复Proxy实现
+// src/utils/database.ts - 数据库工具类（修正版本，使用现有的 DatabaseConfig）
 
 import knex, { Knex } from 'knex';
 import { DatabaseConfig } from '@/config/database';
 
 /**
- * 数据库工具类
- * 提供数据库连接管理和通用操作方法
- * 
- * 注意：migrations/seeds 配置由 knexfile.ts 管理，这里只处理运行时的数据库连接
+ * 数据库健康状态接口
+ */
+export interface DatabaseHealth {
+  status: 'healthy' | 'unhealthy';
+  message: string;
+  timestamp: Date;
+  responseTime?: number;
+  details?: any;
+}
+
+/**
+ * 数据库管理类
+ * 基于现有的 DatabaseConfig 类提供数据库连接管理和操作接口
  */
 export class Database {
   private static instance: Knex | null = null;
-  private static isConnected: boolean = false;
+  private static isConnected = false;
 
   /**
-   * 获取数据库连接实例
-   * @returns Knex实例
+   * 初始化数据库连接
+   */
+  public static async initialize(): Promise<void> {
+    try {
+      console.log('📊 初始化数据库连接...');
+      
+      // 验证配置
+      if (!DatabaseConfig.validateConfig()) {
+        throw new Error('数据库配置验证失败');
+      }
+      
+      // 创建数据库实例
+      if (!this.instance) {
+        const config = DatabaseConfig.getConfig();
+        this.instance = knex(config);
+        console.log(`📊 正在连接数据库: ${DatabaseConfig.getConnectionString()}`);
+      }
+      
+      // 测试连接
+      await this.testConnection();
+      this.isConnected = true;
+      
+      console.log('✅ 数据库连接初始化成功');
+      
+      // 开发环境提示
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💡 如需运行数据库迁移，请使用: npm run migrate:latest');
+      }
+      
+    } catch (error) {
+      console.error('❌ 数据库初始化失败:', error);
+      this.isConnected = false;
+      
+      // 提供更详细的错误提示
+      this.provideTroubleshootingTips(error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取数据库实例
    */
   public static getInstance(): Knex {
     if (!this.instance) {
-      this.instance = this.createConnection();
+      // 验证配置
+      if (!DatabaseConfig.validateConfig()) {
+        throw new Error('数据库配置验证失败，请检查环境变量设置');
+      }
+      
+      // 创建实例
+      const config = DatabaseConfig.getConfig();
+      this.instance = knex(config);
     }
     return this.instance;
   }
 
   /**
-   * 创建数据库连接
-   * @returns Knex实例
-   */
-  private static createConnection(): Knex {
-    try {
-      // 验证配置
-      if (!DatabaseConfig.validateConfig()) {
-        throw new Error('数据库配置验证失败');
-      }
-
-      // 获取纯连接配置（不包含 migrations/seeds）
-      const config = DatabaseConfig.getConfig();
-      const connection = knex(config);
-
-      console.log(`📊 正在连接数据库: ${DatabaseConfig.getConnectionString()}`);
-      
-      return connection;
-    } catch (error) {
-      console.error('❌ 数据库连接创建失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 初始化数据库连接
-   * 测试连接，但不运行迁移（迁移由 knex CLI 工具处理）
-   */
-  public static async initialize(): Promise<void> {
-    try {
-      const db = this.getInstance();
-
-      // 测试数据库连接
-      await this.testConnection(db);
-
-      this.isConnected = true;
-      console.log('✅ 数据库连接初始化完成');
-      
-      // 提示：迁移需要单独运行
-      if (process.env.NODE_ENV === 'development') {
-        console.log('💡 如需运行数据库迁移，请使用: npm run migrate:latest');
-      }
-    } catch (error) {
-      console.error('❌ 数据库初始化失败:', error);
-      throw error;
-    }
-  }
-
-  /**
    * 测试数据库连接
-   * @param db Knex实例
    */
-  private static async testConnection(db: Knex): Promise<void> {
+  private static async testConnection(): Promise<void> {
+    if (!this.instance) {
+      throw new Error('数据库实例未创建');
+    }
+
     try {
-      await db.raw('SELECT 1 as test');
+      await this.instance.raw('SELECT 1 as test');
       console.log('✅ 数据库连接测试成功');
     } catch (error) {
       console.error('❌ 数据库连接测试失败:', error);
-      const errorMessage = typeof error === 'object' && error !== null && 'message' in error
-        ? (error as { message: string }).message
-        : String(error);
-      throw new Error(`数据库连接失败: ${errorMessage}`);
+      this.provideTroubleshootingTips(error);
+      throw error;
     }
   }
 
   /**
-   * 检查数据库连接状态
-   * @returns 是否已连接
+   * 提供故障排除提示
+   */
+  private static provideTroubleshootingTips(error: any): void {
+    console.log('\n🔍 故障排除提示:');
+    
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      
+      if (message.includes('econnrefused')) {
+        console.log('💡 数据库服务器连接被拒绝，请检查:');
+        console.log('   - 数据库服务是否运行：brew services start mysql');
+        console.log('   - 主机地址和端口是否正确');
+        console.log('   - 防火墙是否阻止连接');
+      } else if (message.includes('access denied')) {
+        console.log('💡 数据库访问被拒绝，请检查:');
+        console.log('   - 用户名和密码是否正确');
+        console.log('   - 用户是否有权限访问该数据库');
+      } else if (message.includes('unknown database')) {
+        console.log('💡 数据库不存在，请检查:');
+        console.log('   - 数据库名称是否正确');
+        console.log('   - 需要创建数据库：CREATE DATABASE ai_question_generator;');
+      } else if (message.includes('配置验证失败')) {
+        console.log('💡 配置验证失败，请确保 .env 文件包含:');
+        console.log('   DB_HOST=localhost');
+        console.log('   DB_USER=root');
+        console.log('   DB_PASSWORD=your_password');
+        console.log('   DB_NAME=ai_question_generator');
+        console.log('   DB_PORT=3306');
+      }
+    }
+    
+    console.log('\n📋 当前环境变量状态:');
+    console.log(`   DB_HOST: ${process.env.DB_HOST || '❌ 未设置'}`);
+    console.log(`   DB_USER: ${process.env.DB_USER || '❌ 未设置'}`);
+    console.log(`   DB_NAME: ${process.env.DB_NAME || '❌ 未设置'}`);
+    console.log(`   DB_PORT: ${process.env.DB_PORT || '3306 (默认)'}`);
+    console.log(`   DB_PASSWORD: ${process.env.DB_PASSWORD ? '✅ 已设置' : '❌ 未设置'}`);
+  }
+
+  /**
+   * 检查是否已连接
    */
   public static isConnectedToDatabase(): boolean {
-    return this.isConnected;
+    return this.isConnected && this.instance !== null;
+  }
+
+  /**
+   * 健康检查
+   */
+  public static async healthCheck(): Promise<DatabaseHealth> {
+    const startTime = Date.now();
+    
+    try {
+      if (!this.instance) {
+        return {
+          status: 'unhealthy',
+          message: '数据库未初始化',
+          timestamp: new Date()
+        };
+      }
+
+      if (!this.isConnected) {
+        return {
+          status: 'unhealthy',
+          message: '数据库未连接',
+          timestamp: new Date()
+        };
+      }
+
+      // 执行简单查询测试连接
+      await this.instance.raw('SELECT 1 as health_check');
+      
+      const responseTime = Date.now() - startTime;
+      
+      return {
+        status: 'healthy',
+        message: '数据库连接正常',
+        timestamp: new Date(),
+        responseTime,
+        details: {
+          connectionString: DatabaseConfig.getConnectionString(),
+          environment: process.env.NODE_ENV || 'development'
+        }
+      };
+      
+    } catch (error) {
+      const responseTime = Date.now() - startTime;
+      
+      return {
+        status: 'unhealthy',
+        message: `数据库连接失败: ${error instanceof Error ? error.message : String(error)}`,
+        timestamp: new Date(),
+        responseTime,
+        details: {
+          error: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+
+  /**
+   * 执行事务
+   */
+  public static async withTransaction<T>(
+    callback: (trx: Knex.Transaction) => Promise<T>
+  ): Promise<T> {
+    if (!this.instance) {
+      throw new Error('数据库未初始化');
+    }
+
+    return await this.instance.transaction(callback);
+  }
+
+  /**
+   * 向后兼容：transaction 方法的别名
+   */
+  public static async transaction<T>(
+    callback: (trx: Knex.Transaction) => Promise<T>
+  ): Promise<T> {
+    return this.withTransaction(callback);
   }
 
   /**
@@ -102,6 +225,7 @@ export class Database {
    */
   public static async close(): Promise<void> {
     if (this.instance) {
+      console.log('📊 关闭数据库连接...');
       try {
         await this.instance.destroy();
         this.instance = null;
@@ -114,131 +238,16 @@ export class Database {
   }
 
   /**
-   * 开始事务
-   * @returns 事务对象
+   * 获取表是否存在
    */
-  public static async beginTransaction(): Promise<Knex.Transaction> {
-    const db = this.getInstance();
-    return await db.transaction();
-  }
-
-  /**
-   * 安全执行数据库操作（自动处理事务）
-   * @param operation 数据库操作函数
-   * @returns 操作结果
-   */
-  public static async withTransaction<T>(
-    operation: (trx: Knex.Transaction) => Promise<T>
-  ): Promise<T> {
-    const db = this.getInstance();
-    
-    return await db.transaction(async (trx) => {
-      try {
-        const result = await operation(trx);
-        return result; // Knex会自动commit
-      } catch (error) {
-        throw error; // Knex会自动rollback
-      }
-    });
-  }
-
-  /**
-   * 🔧 向后兼容：transaction 方法的别名
-   * @param operation 数据库操作函数
-   * @returns 操作结果
-   */
-  public static async transaction<T>(
-    operation: (trx: Knex.Transaction) => Promise<T>
-  ): Promise<T> {
-    return this.withTransaction(operation);
-  }
-
-  /**
-   * 健康检查
-   * @returns 健康状态信息
-   */
-  public static async healthCheck(): Promise<{
-    status: 'healthy' | 'unhealthy';
-    message: string;
-    details?: any;
-  }> {
-    try {
-      if (!this.isConnected) {
-        return {
-          status: 'unhealthy',
-          message: '数据库未连接'
-        };
-      }
-
-      const db = this.getInstance();
-      const startTime = Date.now();
-      
-      // 执行简单查询测试
-      await db.raw('SELECT 1 as health_check');
-      
-      const responseTime = Date.now() - startTime;
-
-      return {
-        status: 'healthy',
-        message: '数据库连接正常',
-        details: {
-          responseTime: `${responseTime}ms`,
-          connectionString: DatabaseConfig.getConnectionString()
-        }
-      };
-    } catch (error) {
-      return {
-        status: 'unhealthy',
-        message: '数据库健康检查失败',
-        details: {
-          error: typeof error === 'object' && error !== null && 'message' in error
-            ? (error as { message: string }).message
-            : String(error)
-        }
-      };
+  public static async tableExists(tableName: string): Promise<boolean> {
+    if (!this.instance) {
+      throw new Error('数据库未初始化');
     }
-  }
 
-  /**
-   * 获取数据库信息
-   * @returns 数据库信息
-   */
-  public static async getInfo(): Promise<any> {
     try {
-      const db = this.getInstance();
-      
-      // 获取数据库版本
-      const [versionResult] = await db.raw('SELECT VERSION() as version');
-      
-      // 获取数据库大小（MySQL）
-      const [sizeResult] = await db.raw(`
-        SELECT 
-          ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
-        FROM information_schema.tables 
-        WHERE table_schema = DATABASE()
-      `);
-
-      return {
-        version: versionResult.version,
-        size: `${sizeResult.size_mb || 0} MB`,
-        charset: 'utf8mb4',
-        timezone: '+08:00'
-      };
-    } catch (error) {
-      console.error('获取数据库信息失败:', error);
-      return null;
-    }
-  }
-
-  /**
-   * 检查表是否存在
-   * @param tableName 表名
-   * @returns 是否存在
-   */
-  public static async hasTable(tableName: string): Promise<boolean> {
-    try {
-      const db = this.getInstance();
-      return await db.schema.hasTable(tableName);
+      const result = await this.instance.schema.hasTable(tableName);
+      return result;
     } catch (error) {
       console.error(`检查表 ${tableName} 是否存在失败:`, error);
       return false;
@@ -246,13 +255,72 @@ export class Database {
   }
 
   /**
+   * 获取数据库信息
+   */
+  public static async getInfo(): Promise<{
+    version: string;
+    connectionCount: number;
+    uptime: number;
+    charset: string;
+    timezone: string;
+  }> {
+    if (!this.instance) {
+      throw new Error('数据库未初始化');
+    }
+
+    try {
+      // 获取数据库版本
+      const [versionResult] = await this.instance.raw('SELECT VERSION() as version');
+      
+      // 获取状态信息
+      const statusResults = await this.instance.raw('SHOW STATUS WHERE Variable_name IN ("Threads_connected", "Uptime")');
+      
+      const version = versionResult?.[0]?.version || 'unknown';
+      
+      // 解析状态信息
+      let connectionCount = 0;
+      let uptime = 0;
+      
+      if (Array.isArray(statusResults[0])) {
+        statusResults[0].forEach((row: any) => {
+          if (row.Variable_name === 'Threads_connected') {
+            connectionCount = parseInt(row.Value, 10) || 0;
+          } else if (row.Variable_name === 'Uptime') {
+            uptime = parseInt(row.Value, 10) || 0;
+          }
+        });
+      }
+
+      return {
+        version,
+        connectionCount,
+        uptime,
+        charset: 'utf8mb4',
+        timezone: '+08:00'
+      };
+      
+    } catch (error) {
+      console.error('获取数据库信息失败:', error);
+      return {
+        version: 'unknown',
+        connectionCount: 0,
+        uptime: 0,
+        charset: 'utf8mb4',
+        timezone: '+08:00'
+      };
+    }
+  }
+
+  /**
    * 获取所有表名
-   * @returns 表名列表
    */
   public static async getAllTables(): Promise<string[]> {
+    if (!this.instance) {
+      throw new Error('数据库未初始化');
+    }
+
     try {
-      const db = this.getInstance();
-      const result = await db.raw(`
+      const result = await this.instance.raw(`
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_schema = DATABASE()
@@ -264,23 +332,66 @@ export class Database {
       return [];
     }
   }
+
+  /**
+   * 检查必要的表是否存在
+   */
+  public static async checkRequiredTables(): Promise<{
+    allExist: boolean;
+    missing: string[];
+    existing: string[];
+  }> {
+    const requiredTables = [
+      'processing_jobs',
+      'users', 
+      'documents'
+      // 添加其他必要的表名
+    ];
+
+    const existing: string[] = [];
+    const missing: string[] = [];
+
+    for (const tableName of requiredTables) {
+      try {
+        const exists = await this.tableExists(tableName);
+        if (exists) {
+          existing.push(tableName);
+        } else {
+          missing.push(tableName);
+        }
+      } catch (error) {
+        console.error(`检查表 ${tableName} 时出错:`, error);
+        missing.push(tableName);
+      }
+    }
+
+    return {
+      allExist: missing.length === 0,
+      missing,
+      existing
+    };
+  }
 }
 
-// 🔧 修复：延迟初始化数据库实例，避免在模块加载时立即执行
+// 延迟初始化数据库实例，避免在模块加载时立即执行
 let dbInstance: Knex | null = null;
 
 /**
  * 获取数据库实例的安全方法
- * @returns Knex实例
  */
-export function getDatabase(): Knex {
+function getDatabase(): Knex {
   if (!dbInstance) {
     dbInstance = Database.getInstance();
   }
   return dbInstance;
 }
 
-// 🔧 修复：完全重新实现 db 导出，支持函数调用
+/**
+ * 数据库实例的 Proxy，支持函数调用和属性访问
+ * 使用方法：
+ * - 函数调用：db('table_name').select('*')
+ * - 属性访问：db.raw('SELECT 1'), db.schema.hasTable('users')
+ */
 export const db = new Proxy((() => {}) as any, {
   // 拦截函数调用：db('table_name')
   apply(_target, _thisArg, argArray) {
@@ -296,5 +407,5 @@ export const db = new Proxy((() => {}) as any, {
   }
 }) as Knex;
 
-// 默认导出Database类
+// 默认导出
 export default Database;
