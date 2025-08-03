@@ -190,12 +190,12 @@ export class DocumentController {
       // 上传文件到存储服务（文件大小验证在内部进行）
       const uploadResult = await FileUploadService.uploadFile(
         fileStreamInfo,
-        request.appUser.id
+        request.appUser!.id
       );
 
       // 创建文档记录
       const createRequest: CreateDocumentServiceRequest = {
-        userId: request.appUser.id,
+        userId: request.appUser!.id,
         uploadResult,
         metadata,
         parseConfig,
@@ -608,7 +608,7 @@ export class DocumentController {
       }
 
       // 重定向到下载URL
-      reply.redirect(302, document.downloadUrl);
+      reply.status(302).redirect(document.downloadUrl);
 
     } catch (error) {
       console.error('下载文档失败:', error);
