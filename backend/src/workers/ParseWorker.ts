@@ -256,7 +256,7 @@ export class ParseWorker extends BaseWorker {
           dependsOn: job.job_id
         },
         input_params: chunkInputParams,
-        file_path: null
+        file_path: ''
       });
       
       console.log(`📦 创建分块作业: ${chunkJob.job_id} (文档: ${job.doc_id})`);
@@ -300,7 +300,7 @@ export class ParseWorker extends BaseWorker {
     return {
       success: false,
       error: getErrorMessage(error),
-      errorStack: error instanceof Error ? error.stack : undefined,
+      errorStack: error instanceof Error ? error.stack ?? '' : '',
       duration,
       data: {
         errorType,
