@@ -64,20 +64,51 @@ export class TextParser extends BaseParser {
    */
   private extractSections(text: string, config: ParseConfig): ParsedSection[] {
     const sections: ParsedSection[] = [];
-    
-    // 按空行分段
-    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-    
+
+    const separatorRegex = /\n\s*\n/g;
+    let match: RegExpExecArray | null;
     let currentChar = 0;
-    
-    paragraphs.forEach((paragraph, index) => {
+    let index = 0;
+
+    while ((match = separatorRegex.exec(text)) !== null) {
+      const paragraph = text.slice(currentChar, match.index);
       const trimmedParagraph = paragraph.trim();
+
+      if (trimmedParagraph.length > 0) {
+        const startChar = currentChar;
+        const endChar = startChar + trimmedParagraph.length;
+        const isTitle = this.detectTitle(trimmedParagraph, config);
+
+        const section: ParsedSection = {
+          path: (index + 1).toString(),
+          text: trimmedParagraph,
+          level: isTitle ? 1 : 2,
+          startChar,
+          endChar,
+          type: isTitle ? SectionType.TITLE : SectionType.PARAGRAPH,
+          confidence: 0.8,
+          metadata: {
+            paragraphIndex: index,
+            wordCount: trimmedParagraph.split(/\s+/).length
+          }
+        };
+        if (isTitle) {
+          section.title = trimmedParagraph;
+        }
+        sections.push(section);
+        index++;
+      }
+
+      currentChar = match.index + match[0].length;
+    }
+
+    const lastParagraph = text.slice(currentChar);
+    if (lastParagraph.trim().length > 0) {
+      const trimmedParagraph = lastParagraph.trim();
       const startChar = currentChar;
       const endChar = startChar + trimmedParagraph.length;
-      
-      // 检测是否为标题
       const isTitle = this.detectTitle(trimmedParagraph, config);
-      
+
       const section: ParsedSection = {
         path: (index + 1).toString(),
         text: trimmedParagraph,
@@ -95,10 +126,8 @@ export class TextParser extends BaseParser {
         section.title = trimmedParagraph;
       }
       sections.push(section);
-      
-      currentChar = endChar + 2; // 包括换行符
-    });
-    
+    }
+
     return sections;
   }
 
