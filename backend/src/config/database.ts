@@ -53,8 +53,8 @@ export class DatabaseConfig {
           ...baseConfig,
           connection: {
             ...(baseConfig.connection as Knex.MySqlConnectionConfig),
-            database: `${process.env.DB_NAME || 'ai_question_generator'}_test`
-          },
+          database: process.env.DB_NAME || 'ai_question_generator_test',
+        },
           pool: { min: 1, max: 5 } // 测试环境减少连接数
         };
 

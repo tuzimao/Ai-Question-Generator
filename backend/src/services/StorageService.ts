@@ -4,6 +4,8 @@ import { Client as MinioClient, BucketItem} from 'minio';
 import { Readable } from 'stream';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import * as fs from 'fs';
+
 
 /**
  * 文件上传配置接口
@@ -53,6 +55,7 @@ export class StorageService {
   private readonly secretKey!: string;
   private isConnected: boolean = false;
   private initializationError: string | null = null;
+  private basePath!: string;
 
   // 默认存储桶配置
   private readonly defaultBuckets = {
@@ -70,6 +73,8 @@ export class StorageService {
       this.useSSL = process.env.MINIO_USE_SSL === 'true';
       this.accessKey = process.env.MINIO_ACCESS_KEY || 'minioadmin';
       this.secretKey = process.env.MINIO_SECRET_KEY || 'minioadmin123';
+      this.basePath = process.env.MINIO_DATA_PATH || './storage';
+
 
       console.log(`📁 MinIO存储服务构造完成: ${this.endpoint}:${this.port}`);
     } catch (error) {
@@ -142,6 +147,27 @@ export class StorageService {
     } catch (error) {
       console.error('MinIO健康检查失败:', typeof error === 'object' && error !== null && 'message' in error ? (error as { message: string }).message : String(error));
       return false;
+    }
+  }
+
+   /**
+   * 获取文件流
+   */
+  public async getFileStream(bucket: string, filePath: string): Promise<Readable> {
+    try {
+      const fullPath = path.join(this.basePath, bucket, filePath);
+      
+      // 检查文件是否存在
+      if (!fs.existsSync(fullPath)) {
+        throw new Error(`文件不存在: ${filePath}`);
+      }
+      
+      // 返回文件流
+      return fs.createReadStream(fullPath);
+      
+    } catch (error) {
+      console.error('获取文件流失败:', error);
+      throw error;
     }
   }
 
@@ -567,6 +593,8 @@ export class StorageService {
     console.log('📴 MinIO存储服务连接已关闭');
   }
 }
+
+
 
 /**
  * 创建存储服务单例实例

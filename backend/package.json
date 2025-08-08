@@ -30,9 +30,18 @@
     "worker:cleanup": "ts-node --transpile-only -r tsconfig-paths/register scripts/worker-cli.ts cleanup",
     "worker:test": "ts-node --transpile-only -r tsconfig-paths/register scripts/worker-cli.ts test",
     "worker:dev": "nodemon --exec ts-node --transpile-only -r tsconfig-paths/register scripts/worker-cli.ts start",
-    "test": "jest",
-    "test:services": "node scripts/test-services.js",
-    "test:db": "npm run build && node scripts/test-database-tables.js",
+
+
+    "test": "NODE_ENV=test jest",
+    "test:watch": "NODE_ENV=test jest --watch",
+    "test:coverage": "NODE_ENV=test jest --coverage",
+    "test:setup": "NODE_ENV=test ts-node scripts/setup-test-db.ts",
+    "test:migrate": "NODE_ENV=test knex migrate:latest",
+    "test:rollback": "NODE_ENV=test knex migrate:rollback",
+    "test:reset": "NODE_ENV=test knex migrate:rollback --all && NODE_ENV=test knex migrate:latest",
+    "pretest": "npm run test:setup",
+
+
     "check:env": "node scripts/check-env.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
