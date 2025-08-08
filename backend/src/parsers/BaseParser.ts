@@ -80,14 +80,14 @@ export abstract class BaseParser implements IParser {
   /**
    * 子类特定的文件验证
    */
-  protected async validateSpecific(filePath: string): Promise<boolean> {
+  protected async validateSpecific(_filePath: string): Promise<boolean> {
     return true; // 默认实现，子类可以重写
   }
   
   /**
    * 子类特定的文档信息获取
    */
-  protected async getSpecificInfo(filePath: string): Promise<Partial<DocumentMetadata>> {
+  protected async getSpecificInfo(_filePath: string): Promise<Partial<DocumentMetadata>> {
     return {}; // 默认实现，子类可以重写
   }
   

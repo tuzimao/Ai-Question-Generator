@@ -50,7 +50,7 @@
   },
   "include": [
     "src/**/*"                                  // 包含src目录下所有文件
-  ],
+, "test/TextParser.test.ts"  ],
   "exclude": [
     "node_modules",                             // 排除node_modules
     "dist",                                     // 排除编译输出目录
