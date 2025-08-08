@@ -1,20 +1,27 @@
 // backend/test/setup.ts
 import dotenv from 'dotenv';
 import path from 'path';
-import { jest, beforeAll, afterAll} from '@jest/globals';
-
+import { jest, beforeAll, afterAll, afterEach} from '@jest/globals';
+import { TestDatabase } from '../test/utils/database'; // Adjust the path if needed
 
 // 加载测试环境变量
-dotenv.config({ path: path.join(__dirname, '../.env.test') });
+dotenv.config({ path: path.join(__dirname, '/.env.test') });
 
 // 设置测试超时
 jest.setTimeout(30000);
 
 // 全局测试前置和后置钩子
 beforeAll(async () => {
-  console.log('🧪 测试环境初始化...');
+  await TestDatabase.ensureDatabaseExists();
+  await TestDatabase.initialize();
+  await TestDatabase.runMigrations();
+  await TestDatabase.cleanAllTables(); // ← 新增
+});
+
+afterEach(async () => {
+  await TestDatabase.cleanAllTables(); // 仅清表，不关闭连接
 });
 
 afterAll(async () => {
-  console.log('🧪 测试环境清理...');
+  await TestDatabase.close(); // 统一在最后关闭
 });

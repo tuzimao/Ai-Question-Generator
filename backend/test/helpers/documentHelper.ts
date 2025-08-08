@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { FileUploadResult } from '../../src/services/FileUploadService';
+import StorageService from '../../src/services/StorageService';
 import DocumentModel, { Document, CreateDocumentRequest } from '../../src/models/Document';
 import ProcessingJobModel, { ProcessingJob, JobType } from '../../src/models/ProcessingJob';
 
@@ -47,26 +48,35 @@ export class DocumentTestHelper {
   /**
    * 模拟文件上传结果
    */
-  static async mockUploadResult(
+    static async mockUploadResult(
     filename: string,
     content: string,
     mimeType: string = 'text/plain'
-  ): Promise<FileUploadResult> {
+    ): Promise<FileUploadResult> {
     const fileId = uuidv4();
-    const filePath = await this.createTestFile(`${fileId}_${filename}`, content);
-    const contentHash = crypto.createHash('sha256').update(content).digest('hex');
-    
+
+    // ✅ 用 MinIO 上传（桶名建议用 StorageService 的默认 "documents"）
+    const storage = new StorageService();
+    await storage.initialize(); // 建立连接 & 创建默认桶
+    const objectName = `${fileId}_${filename}`;
+
+    const fileInfo = await storage.uploadFile(
+        Buffer.from(content, 'utf8'),
+        { bucket: 'documents', fileName: objectName, contentType: mimeType }
+    );
+
+    // ❗ storagePath 现在是对象键（objectName），不是本地绝对路径
     return {
-      fileId,
-      originalName: filename,
-      storagePath: filePath,
-      storageBucket: 'test-documents',
-      size: Buffer.byteLength(content, 'utf8'),
-      mimeType,
-      contentHash,
-      uploadDate: new Date()
+        fileId,
+        originalName: filename,
+        storagePath: fileInfo.fileName, // << object key
+        storageBucket: fileInfo.bucket, // 'documents'
+        size: Buffer.byteLength(content, 'utf8'),
+        mimeType,
+        contentHash: crypto.createHash('sha256').update(content).digest('hex'),
+        //uploadDate: new Date(),
     };
-  }
+    }
 
   /**
    * 创建测试文档

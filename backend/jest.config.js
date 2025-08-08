@@ -16,7 +16,7 @@ module.exports = {
   transform: {
     '^.+\\.(t|j)sx?$': ['ts-jest', {
       diagnostics: false,      // 跳过类型检查
-      isolatedModules: true,   // 仅转译，更快
+     // isolatedModules: true,   // 仅转译，更快
       tsconfig: {
         strict: false,
         skipLibCheck: true,

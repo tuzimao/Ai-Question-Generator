@@ -3,6 +3,7 @@
 import { Knex } from 'knex';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/utils/database';
+import { safeJson } from '@/utils/json';
 import { BaseEntity } from '@/types/base';
 
 /**
@@ -283,23 +284,32 @@ export class DocumentSectionModel {
     options: SectionQueryOptions = {}
   ): Promise<DocumentSection[]> {
     try {
-      let query = db(this.TABLE_NAME)
-        .where('doc_id', docId);
+      let query = db(this.TABLE_NAME).where('doc_id', docId);
 
       query = this.applyQueryOptions(query, options);
-      
-      // 默认按层级和顺序排序
-      const sortBy = options.sortBy || 'section_order';
-      const sortOrder = options.sortOrder || 'asc';
-      query = query.orderBy('level', 'asc').orderBy(sortBy, sortOrder);
 
-      const sections = await query;
-      return sections.map(section => this.formatSection(section));
+      // 如果调用方没指定排序，就用一个稳定的默认排序
+      if (!options.sortBy) {
+        query = query.orderBy([
+          { column: 'section_order', order: 'asc' },
+          { column: 'start_page',    order: 'asc' },
+          { column: 'start_char',    order: 'asc' },
+          { column: 'section_id',    order: 'asc' }, // 兜底，确保稳定
+        ]);
+      } else {
+        const sortBy = options.sortBy;
+        const sortOrder = options.sortOrder || 'asc';
+        query = query.orderBy(sortBy, sortOrder);
+      }
+
+      const rows = await query;
+      return rows.map(r => this.formatSection(r));
     } catch (error) {
       console.error('查找文档章节失败:', error);
       throw error;
     }
   }
+
 
   /**
    * 获取章节树结构
@@ -635,22 +645,24 @@ export class DocumentSectionModel {
   private static formatSection(section: any): DocumentSection {
     return {
       ...section,
-      // 解析JSON字段
-      markdown_attributes: section.markdown_attributes ? JSON.parse(section.markdown_attributes) : undefined,
-      pdf_coordinates: section.pdf_coordinates ? JSON.parse(section.pdf_coordinates) : undefined,
-      quality_metrics: section.quality_metrics ? JSON.parse(section.quality_metrics) : undefined,
-      metadata: section.metadata ? JSON.parse(section.metadata) : undefined,
-      // 确保数字类型
-      level: Number(section.level),
-      section_order: Number(section.section_order),
-      start_char: Number(section.start_char),
-      end_char: Number(section.end_char),
-      start_page: section.start_page ? Number(section.start_page) : undefined,
-      end_page: section.end_page ? Number(section.end_page) : undefined,
-      token_count: section.token_count ? Number(section.token_count) : undefined,
-      confidence_score: section.confidence_score ? Number(section.confidence_score) : undefined
+      // ✅ 安全解析 JSON 字段
+      markdown_attributes: safeJson(section.markdown_attributes),
+      pdf_coordinates:     safeJson(section.pdf_coordinates),
+      quality_metrics:     safeJson(section.quality_metrics),
+      metadata:            safeJson(section.metadata),
+
+      // ✅ 数字字段稳妥转换（避免 NaN）
+      level:          section.level != null ? Number(section.level) : undefined,
+      section_order:  section.section_order != null ? Number(section.section_order) : undefined,
+      start_char:     section.start_char != null ? Number(section.start_char) : undefined,
+      end_char:       section.end_char != null ? Number(section.end_char) : undefined,
+      start_page:     section.start_page != null ? Number(section.start_page) : undefined,
+      end_page:       section.end_page != null ? Number(section.end_page) : undefined,
+      token_count:    section.token_count != null ? Number(section.token_count) : undefined,
+      confidence_score: section.confidence_score != null ? Number(section.confidence_score) : undefined,
     };
   }
+
 }
 
 // 导出章节模型类

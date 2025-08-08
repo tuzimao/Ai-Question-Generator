@@ -153,23 +153,35 @@ export class StorageService {
    /**
    * 获取文件流
    */
+
   public async getFileStream(bucket: string, filePath: string): Promise<Readable> {
     try {
-      const fullPath = path.join(this.basePath, bucket, filePath);
-      
-      // 检查文件是否存在
-      if (!fs.existsSync(fullPath)) {
-        throw new Error(`文件不存在: ${filePath}`);
+      // ✅ 优先用 MinIO
+      if (!this.client) {
+        // 懒初始化：如果没 client，尝试 initialize
+        await this.initialize();
       }
-      
-      // 返回文件流
+      if (this.client && this.isConnected) {
+        // 这里 filePath 应该是对象键（相对路径），不要传绝对路径
+        return await this.client.getObject(bucket, filePath);
+      }
+
+      // ⬇️ 回退到本地文件模式（仅当没有 MinIO 时）
+      const fullPath = path.isAbsolute(filePath)
+        ? filePath
+        : path.join(this.basePath, bucket, filePath);
+
+      if (!fs.existsSync(fullPath)) {
+        throw new Error(`文件不存在: ${fullPath}`);
+      }
       return fs.createReadStream(fullPath);
-      
+
     } catch (error) {
       console.error('获取文件流失败:', error);
       throw error;
     }
   }
+
 
   /**
    * 获取连接状态

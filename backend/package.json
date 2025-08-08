@@ -32,7 +32,7 @@
     "worker:dev": "nodemon --exec ts-node --transpile-only -r tsconfig-paths/register scripts/worker-cli.ts start",
 
 
-    "test": "NODE_ENV=test jest",
+    "test": "NODE_ENV=test jest --runInBand --detectOpenHandles --testTimeout=60000",
     "test:watch": "NODE_ENV=test jest --watch",
     "test:coverage": "NODE_ENV=test jest --coverage",
     "test:setup": "NODE_ENV=test ts-node scripts/setup-test-db.ts",

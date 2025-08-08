@@ -34,6 +34,9 @@
     "noUnusedLocals": true,                     // 检查未使用的局部变量
     "noUnusedParameters": true,                 // 检查未使用的参数
     
+    "isolatedModules": true,
+
+
     /* 额外检查 */
     "noUncheckedIndexedAccess": true,           // 禁止未检查的索引访问
     "exactOptionalPropertyTypes": true,         // 精确的可选属性类型
