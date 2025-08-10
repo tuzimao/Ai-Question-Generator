@@ -1,4 +1,4 @@
-// src/parsers/ParserFactory.ts - 解析器工厂
+// src/parsers/ParserFactory.ts - 解析器工厂（更新版）
 
 import { IParser, IParserFactory, ParseError, ParseErrorType } from '@/types/parse';
 
@@ -102,7 +102,7 @@ export class ParserFactory implements IParserFactory {
    * 注册默认解析器
    */
   private registerDefaultParsers(): void {
-    // PDF解析器
+    // PDF解析器 - 使用真实的PDFParser实现
     this.registerParserFactory(
       ['application/pdf'],
       () => {
@@ -111,7 +111,7 @@ export class ParserFactory implements IParserFactory {
       }
     );
     
-    // Markdown解析器
+    // Markdown解析器 - 暂时使用占位符，后续实现
     this.registerParserFactory(
       ['text/markdown', 'text/x-markdown'],
       () => {
@@ -130,6 +130,9 @@ export class ParserFactory implements IParserFactory {
     );
     
     console.log(`🔧 解析器工厂初始化完成，支持 ${this.getSupportedMimeTypes().length} 种格式`);
+    console.log(`📄 支持的格式: ${this.getSupportedMimeTypes().join(', ')}`);
   }
 }
 
+// 导出工厂类
+export default ParserFactory;
