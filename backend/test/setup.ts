@@ -19,7 +19,11 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
-  await TestDatabase.cleanAllTables(); // 仅清表，不关闭连接
+  if (process.env.KEEP_TEST_DB === 'true') {
+    console.log('🛑 KEEP_TEST_DB=true，跳过清表');
+    return;
+  }
+  await TestDatabase.cleanAllTables();
 });
 
 afterAll(async () => {
