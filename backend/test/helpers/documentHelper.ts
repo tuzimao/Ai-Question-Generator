@@ -50,33 +50,40 @@ export class DocumentTestHelper {
    */
     static async mockUploadResult(
     filename: string,
-    content: string,
-    mimeType: string = 'text/plain'
+    content: string | Buffer,
+    mimeType: string = 'text/plain',       // PDF 时传 'application/pdf'
+    bucket: string = 'uploads'             // 建议测试统一走 'uploads'
     ): Promise<FileUploadResult> {
     const fileId = uuidv4();
-
-    // ✅ 用 MinIO 上传（桶名建议用 StorageService 的默认 "documents"）
     const storage = new StorageService();
-    await storage.initialize(); // 建立连接 & 创建默认桶
+    await storage.initialize();
+
     const objectName = `${fileId}_${filename}`;
+    const buf = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
 
-    const fileInfo = await storage.uploadFile(
-        Buffer.from(content, 'utf8'),
-        { bucket: 'documents', fileName: objectName, contentType: mimeType }
-    );
+    // 你的 StorageService.uploadFile 看起来支持 (buffer, { bucket, fileName, contentType })
+    const fileInfo = await storage.uploadFile(buf, {
+        bucket,
+        fileName: objectName,
+        contentType: mimeType,
+    });
 
-    // ❗ storagePath 现在是对象键（objectName），不是本地绝对路径
+    const contentHash = crypto.createHash('sha256').update(buf).digest('hex');
+
     return {
         fileId,
         originalName: filename,
-        storagePath: fileInfo.fileName, // << object key
-        storageBucket: fileInfo.bucket, // 'documents'
-        size: Buffer.byteLength(content, 'utf8'),
+        storagePath: fileInfo.fileName ?? objectName, // 对齐对象键
+        storageBucket: fileInfo.bucket ?? bucket,     // 防御式兜底
+        size: buf.length,
         mimeType,
-        contentHash: crypto.createHash('sha256').update(content).digest('hex'),
-        //uploadDate: new Date(),
+        contentHash,
     };
     }
+
+    
+
+    
 
   /**
    * 创建测试文档
@@ -183,5 +190,54 @@ export class DocumentTestHelper {
     }
     
     return content.join('\n');
+
+    
   }
+
+static async mockUploadResultFromBuffer(
+    filename: string,
+    buf: Buffer,
+    mime = 'application/pdf'
+    ) {
+    const storage = new StorageService();
+    await storage.initialize();
+
+    const fileId = uuidv4();
+    const storageBucket = 'uploads';
+    const storagePath = `tests/${fileId}_${filename}`;
+
+    // 如果你没有 uploadBuffer，可以临时写到 /tmp 再走 uploadFile
+    if (typeof (storage as any).uploadBuffer === 'function') {
+        await (storage as any).uploadBuffer(storageBucket, storagePath, buf, mime);
+    } else {
+        const fs = await import('fs/promises');
+        const os = await import('os');
+        const path = await import('path');
+        const tmp = path.join(os.tmpdir(), `${fileId}.pdf`);
+        await fs.writeFile(tmp, buf);
+        await (storage as any).uploadFile(storageBucket, storagePath, tmp, mime);
+    }
+
+    const contentHash = crypto.createHash('sha256').update(buf).digest('hex');
+
+    return {
+        fileId,
+        originalName: filename,
+        mimeType: mime,
+        size: buf.length,
+        storageBucket,
+        storagePath,
+        contentHash,
+    };
+   }
+
 }
+
+
+
+
+
+
+
+
+

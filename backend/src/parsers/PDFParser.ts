@@ -34,11 +34,11 @@ interface PDFParseResult {
 }
 
 // 页面渲染选项
-interface PDFRenderOptions {
-  pagerender?: (pageData: { pageNumber: number; pageIndex: number }) => string;
-  max?: number;
-  normalizeWhitespace?: boolean;
-}
+// interface PDFRenderOptions {
+//   pagerender?: (pageData: { pageNumber: number; pageIndex: number }) => string;
+//   max?: number;
+//   normalizeWhitespace?: boolean;
+// }
 
 /**
  * PDF解析器
@@ -437,13 +437,13 @@ private detectTitle(text: string, config: ParseConfig): boolean {
     const info = pdfData.info || {};
     
     return {
-      title: info.Title,
-      author: info.Author,
-      subject: info.Subject,
-      producer: info.Producer,
-      pdfVersion: pdfData.version,
-      createdAt: info.CreationDate ? this.parseDate(info.CreationDate) : undefined,
-      modifiedAt: info.ModDate ? this.parseDate(info.ModDate) : undefined,
+      title: info.Title ?? '',
+      author: info.Author ?? '',
+      subject: info.Subject ?? '',
+      producer: info.Producer ?? '',
+      pdfVersion: pdfData.version ?? '',
+      createdAt: info.CreationDate ? this.parseDate(info.CreationDate) ?? new Date(0) : new Date(0),
+      modifiedAt: info.ModDate ? this.parseDate(info.ModDate) ?? new Date(0) : new Date(0),
       encrypted: info.IsEncrypted || false,
       customProperties: {
         keywords: info.Keywords,
@@ -465,12 +465,12 @@ private detectTitle(text: string, config: ParseConfig): boolean {
       if (match) {
         const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
         return new Date(
-          parseInt(year), 
-          parseInt(month) - 1, 
-          parseInt(day),
-          parseInt(hour),
-          parseInt(minute),
-          parseInt(second)
+          parseInt(year || '0'), 
+          parseInt(month || '1') - 1, 
+          parseInt(day || '1'),
+          parseInt(hour || '0'),
+          parseInt(minute || '0'),
+          parseInt(second || '0')
         );
       }
       
