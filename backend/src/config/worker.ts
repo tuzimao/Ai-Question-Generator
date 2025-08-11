@@ -41,20 +41,17 @@ export class WorkerConfiguration {
   /**
    * 获取文档分块Worker配置
    */
-  public static getChunkWorkerConfig(): WorkerConfig {
-    const defaults = this.getDefaultConfig();
-    
-    return {
-      name: 'document-chunker',
-      queueName: 'chunk-processing',
-      concurrency: parseInt(process.env.CHUNK_WORKER_CONCURRENCY || '5', 10),
-      pollInterval: parseInt(process.env.CHUNK_WORKER_POLL_INTERVAL || '2000', 10),
-      maxRetries: parseInt(process.env.CHUNK_WORKER_MAX_RETRIES || '2', 10),
-      timeout: parseInt(process.env.CHUNK_WORKER_TIMEOUT || '300000', 10), // 5分钟
-      enabled: process.env.CHUNK_WORKER_ENABLED !== 'false',
-      ...defaults
-    };
-  }
+public static getChunkWorkerConfig(): WorkerConfig {
+  return {
+    name: 'document-chunker',
+    queueName: 'chunk-processing',
+    concurrency: parseInt(process.env.CHUNK_WORKER_CONCURRENCY || '3', 10),
+    pollInterval: parseInt(process.env.CHUNK_WORKER_POLL_INTERVAL || '2000', 10),
+    maxRetries: parseInt(process.env.CHUNK_WORKER_MAX_RETRIES || '3', 10),
+    timeout: parseInt(process.env.CHUNK_WORKER_TIMEOUT || '300000', 10), // 5分钟
+    enabled: process.env.CHUNK_WORKER_ENABLED !== 'false'
+  };
+}
 
   /**
    * 获取清理Worker配置
@@ -73,6 +70,9 @@ export class WorkerConfiguration {
       ...defaults
     };
   }
+
+
+  
 
   /**
    * 获取所有Worker配置

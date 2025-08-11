@@ -231,77 +231,79 @@ export class DocumentChunkModel {
    * @returns 创建的块信息
    */
   public static async create(
-    chunkData: CreateChunkRequest,
-    trx?: Knex.Transaction
-  ): Promise<DocumentChunk> {
-    const dbInstance = trx || db;
+  chunkData: CreateChunkRequest,
+  trx?: Knex.Transaction
+): Promise<DocumentChunk> {
+  const dbInstance = trx || db;
 
-    try {
-      // 验证块索引在文档内的唯一性
-      const existingChunk = await dbInstance(this.TABLE_NAME)
-        .where('doc_id', chunkData.doc_id)
-        .where('chunk_index', chunkData.chunk_index)
-        .first();
+  try {
+    // （可选）在事务里做一次唯一性检查，错误更友好
+    const existing = await dbInstance(this.TABLE_NAME)
+      .where({ doc_id: chunkData.doc_id, chunk_index: chunkData.chunk_index })
+      .first();
 
-      if (existingChunk) {
-        throw new Error(`块索引 ${chunkData.chunk_index} 在文档中已存在`);
-      }
-
-      // 生成块ID
-      const chunkId = uuidv4();
-      
-      // 准备块记录
-      const chunkRecord = {
-        chunk_id: chunkId,
-        doc_id: chunkData.doc_id,
-        section_id: chunkData.section_id || null,
-        chunk_index: chunkData.chunk_index,
-        start_char: chunkData.start_char,
-        end_char: chunkData.end_char,
-        content: chunkData.content,
-        content_cleaned: chunkData.content_cleaned || null,
-        char_count: chunkData.char_count,
-        token_count: chunkData.token_count,
-        word_count: chunkData.word_count || null,
-        page_span: chunkData.page_span ? JSON.stringify(chunkData.page_span) : null,
-        primary_page: chunkData.primary_page || null,
-        overlap_with_prev: chunkData.overlap_with_prev ? JSON.stringify(chunkData.overlap_with_prev) : null,
-        overlap_with_next: chunkData.overlap_with_next ? JSON.stringify(chunkData.overlap_with_next) : null,
-        related_chunks: chunkData.related_chunks ? JSON.stringify(chunkData.related_chunks) : null,
-        chunking_strategy: chunkData.chunking_strategy || ChunkingStrategy.FIXED_SIZE,
-        chunk_type: chunkData.chunk_type || ChunkType.NORMAL,
-        content_quality: chunkData.content_quality || null,
-        has_incomplete_sentence: chunkData.has_incomplete_sentence || false,
-        is_boundary_chunk: chunkData.is_boundary_chunk || false,
-        embedding_status: EmbeddingStatus.PENDING,
-        vector_id: null,
-        embedded_at: null,
-        embedding_model: null,
-        keywords: chunkData.keywords ? JSON.stringify(chunkData.keywords) : null,
-        entities: chunkData.entities ? JSON.stringify(chunkData.entities) : null,
-        summary: chunkData.summary || null,
-        metadata: chunkData.metadata ? JSON.stringify(chunkData.metadata) : null,
-        chunking_config: chunkData.chunking_config ? JSON.stringify(chunkData.chunking_config) : null,
-        processing_notes: chunkData.processing_notes || null,
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-
-      // 插入块记录
-      await dbInstance(this.TABLE_NAME).insert(chunkRecord);
-
-      // 返回创建的块信息
-      const createdChunk = await this.findById(chunkId);
-      if (!createdChunk) {
-        throw new Error('块创建失败');
-      }
-
-      return createdChunk;
-    } catch (error) {
-      console.error('块创建失败:', error);
-      throw error;
+    if (existing) {
+      throw new Error(`块索引 ${chunkData.chunk_index} 在文档 ${chunkData.doc_id} 中已存在`);
     }
+
+    const now = new Date();
+    const chunkId = uuidv4();
+
+    const record = {
+      chunk_id: chunkId,
+      doc_id: chunkData.doc_id,
+      section_id: chunkData.section_id || null,
+      chunk_index: chunkData.chunk_index,
+      start_char: chunkData.start_char,
+      end_char: chunkData.end_char,
+      content: chunkData.content,
+      content_cleaned: chunkData.content_cleaned || null,
+      char_count: chunkData.char_count,
+      token_count: chunkData.token_count ?? null,
+      word_count: chunkData.word_count ?? null,
+
+      page_span: chunkData.page_span ? JSON.stringify(chunkData.page_span) : null,
+      primary_page: chunkData.primary_page ?? null,
+      overlap_with_prev: chunkData.overlap_with_prev ? JSON.stringify(chunkData.overlap_with_prev) : null,
+      overlap_with_next: chunkData.overlap_with_next ? JSON.stringify(chunkData.overlap_with_next) : null,
+      related_chunks: chunkData.related_chunks ? JSON.stringify(chunkData.related_chunks) : null,
+
+      chunking_strategy: chunkData.chunking_strategy || ChunkingStrategy.FIXED_SIZE,
+      chunk_type: chunkData.chunk_type || ChunkType.NORMAL,
+      content_quality: chunkData.content_quality ?? null,
+      has_incomplete_sentence: !!chunkData.has_incomplete_sentence,
+      is_boundary_chunk: !!chunkData.is_boundary_chunk,
+
+      embedding_status: EmbeddingStatus.PENDING,
+      vector_id: null,
+      embedded_at: null,
+      embedding_model: null,
+
+      keywords: chunkData.keywords ? JSON.stringify(chunkData.keywords) : null,
+      entities: chunkData.entities ? JSON.stringify(chunkData.entities) : null,
+      summary: chunkData.summary || null,
+      metadata: chunkData.metadata ? JSON.stringify(chunkData.metadata) : null,
+      chunking_config: chunkData.chunking_config ? JSON.stringify(chunkData.chunking_config) : null,
+      processing_notes: chunkData.processing_notes ? JSON.stringify(chunkData.processing_notes) : null,
+
+      created_at: now,
+      updated_at: now
+    };
+
+    await dbInstance(this.TABLE_NAME).insert(record);
+
+    const created = await dbInstance(this.TABLE_NAME)
+      .where({ chunk_id: chunkId })
+      .first();
+
+    if (!created) throw new Error('块创建失败');
+
+    return this.formatChunk(created);
+  } catch (error) {
+    console.error('块创建失败:', error);
+    throw error;
   }
+}
 
   /**
    * 根据ID查找块
@@ -525,6 +527,7 @@ export class DocumentChunkModel {
    * @param trx 可选的数据库事务
    * @returns 创建的块列表
    */
+// DocumentChunkModel.ts
   public static async batchCreate(
     chunksData: CreateChunkRequest[],
     trx?: Knex.Transaction
@@ -532,49 +535,57 @@ export class DocumentChunkModel {
     const dbInstance = trx || db;
 
     try {
+      const now = new Date();
+
       const chunkRecords = chunksData.map(chunkData => ({
-        chunk_id: uuidv4(),
+        chunk_id: chunkData.chunk_id ?? uuidv4(),               // ✅ 若外部没给就生成
         doc_id: chunkData.doc_id,
         section_id: chunkData.section_id || null,
-        chunk_index: chunkData.chunk_index,
+        chunk_index: chunkData.chunk_index,                      // ✅ 已是全局唯一
         start_char: chunkData.start_char,
         end_char: chunkData.end_char,
         content: chunkData.content,
         content_cleaned: chunkData.content_cleaned || null,
         char_count: chunkData.char_count,
-        token_count: chunkData.token_count,
-        word_count: chunkData.word_count || null,
+        token_count: chunkData.token_count ?? null,
+        word_count: chunkData.word_count ?? null,
+
+        // ✅ 统一 stringify（JSON/TEXT 列都安全）
         page_span: chunkData.page_span ? JSON.stringify(chunkData.page_span) : null,
-        primary_page: chunkData.primary_page || null,
+        primary_page: chunkData.primary_page ?? null,
         overlap_with_prev: chunkData.overlap_with_prev ? JSON.stringify(chunkData.overlap_with_prev) : null,
         overlap_with_next: chunkData.overlap_with_next ? JSON.stringify(chunkData.overlap_with_next) : null,
         related_chunks: chunkData.related_chunks ? JSON.stringify(chunkData.related_chunks) : null,
+
         chunking_strategy: chunkData.chunking_strategy || ChunkingStrategy.FIXED_SIZE,
         chunk_type: chunkData.chunk_type || ChunkType.NORMAL,
-        content_quality: chunkData.content_quality || null,
-        has_incomplete_sentence: chunkData.has_incomplete_sentence || false,
-        is_boundary_chunk: chunkData.is_boundary_chunk || false,
+        content_quality: chunkData.content_quality ?? null,
+        has_incomplete_sentence: !!chunkData.has_incomplete_sentence,
+        is_boundary_chunk: !!chunkData.is_boundary_chunk,
+
         embedding_status: EmbeddingStatus.PENDING,
+
         keywords: chunkData.keywords ? JSON.stringify(chunkData.keywords) : null,
         entities: chunkData.entities ? JSON.stringify(chunkData.entities) : null,
         summary: chunkData.summary || null,
         metadata: chunkData.metadata ? JSON.stringify(chunkData.metadata) : null,
         chunking_config: chunkData.chunking_config ? JSON.stringify(chunkData.chunking_config) : null,
-        processing_notes: chunkData.processing_notes || null,
-        created_at: new Date(),
-        updated_at: new Date()
+        processing_notes: chunkData.processing_notes ? JSON.stringify(chunkData.processing_notes) : null,
+
+        created_at: now,
+        updated_at: now
       }));
 
-      // 批量插入
+      // 批量插入（同一事务）
       await dbInstance(this.TABLE_NAME).insert(chunkRecords);
 
-      // 获取创建的块
-      const chunkIds = chunkRecords.map(record => record.chunk_id);
-      const createdChunks = await db(this.TABLE_NAME)
+      // 读回（同一事务 + 按 chunk_index 排序）
+      const chunkIds = chunkRecords.map(r => r.chunk_id);
+      const createdRows = await dbInstance(this.TABLE_NAME)
         .whereIn('chunk_id', chunkIds)
         .orderBy('chunk_index', 'asc');
 
-      return createdChunks.map(chunk => this.formatChunk(chunk));
+      return createdRows.map(row => this.formatChunk(row));
     } catch (error) {
       console.error('批量创建块失败:', error);
       throw error;
@@ -722,32 +733,47 @@ export class DocumentChunkModel {
    * @param chunk 原始块数据
    * @returns 格式化后的块对象
    */
-  private static formatChunk(chunk: any): DocumentChunk {
-    return {
-      ...chunk,
-      // 解析JSON字段
-      page_span: chunk.page_span ? JSON.parse(chunk.page_span) : undefined,
-      overlap_with_prev: chunk.overlap_with_prev ? JSON.parse(chunk.overlap_with_prev) : undefined,
-      overlap_with_next: chunk.overlap_with_next ? JSON.parse(chunk.overlap_with_next) : undefined,
-      related_chunks: chunk.related_chunks ? JSON.parse(chunk.related_chunks) : undefined,
-      keywords: chunk.keywords ? JSON.parse(chunk.keywords) : undefined,
-      entities: chunk.entities ? JSON.parse(chunk.entities) : undefined,
-      metadata: chunk.metadata ? JSON.parse(chunk.metadata) : undefined,
-      chunking_config: chunk.chunking_config ? JSON.parse(chunk.chunking_config) : undefined,
-      // 确保数字类型
-      chunk_index: Number(chunk.chunk_index),
-      start_char: Number(chunk.start_char),
-      end_char: Number(chunk.end_char),
-      char_count: Number(chunk.char_count),
-      token_count: Number(chunk.token_count),
-      word_count: chunk.word_count ? Number(chunk.word_count) : undefined,
-      primary_page: chunk.primary_page ? Number(chunk.primary_page) : undefined,
-      content_quality: chunk.content_quality ? Number(chunk.content_quality) : undefined,
-      // 确保布尔类型
-      has_incomplete_sentence: Boolean(chunk.has_incomplete_sentence),
-      is_boundary_chunk: Boolean(chunk.is_boundary_chunk)
-    };
+  private static safeParseJSON<T = any>(value: unknown): T | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'object') return value as T; // JSON列可能直接返回对象
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (!s || s === '[object Object]') return undefined; // 历史脏数据兜底
+    try { return JSON.parse(s) as T; } catch { return undefined; }
   }
+  return undefined;
+}
+
+private static formatChunk(row: any): DocumentChunk {
+  return {
+    ...row,
+
+    // ✅ 安全解析 JSON 字段
+    page_span: this.safeParseJSON(row.page_span),
+    overlap_with_prev: this.safeParseJSON(row.overlap_with_prev),
+    overlap_with_next: this.safeParseJSON(row.overlap_with_next),
+    related_chunks: this.safeParseJSON(row.related_chunks),
+    keywords: this.safeParseJSON<string[]>(row.keywords),
+    entities: this.safeParseJSON(row.entities),
+    metadata: this.safeParseJSON(row.metadata),
+    chunking_config: this.safeParseJSON(row.chunking_config),
+    processing_notes: this.safeParseJSON(row.processing_notes),
+
+    // ✅ 数字类型收敛
+    chunk_index: Number(row.chunk_index),
+    start_char: Number(row.start_char),
+    end_char: Number(row.end_char),
+    char_count: Number(row.char_count),
+    token_count: row.token_count == null ? null : Number(row.token_count),
+    word_count: row.word_count == null ? null : Number(row.word_count),
+    primary_page: row.primary_page == null ? null : Number(row.primary_page),
+    content_quality: row.content_quality == null ? null : Number(row.content_quality),
+
+    // ✅ 布尔类型收敛
+    has_incomplete_sentence: Boolean(row.has_incomplete_sentence),
+    is_boundary_chunk: Boolean(row.is_boundary_chunk)
+  };
+}
 }
 
 // 导出块模型类

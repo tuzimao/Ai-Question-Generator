@@ -5,6 +5,7 @@ import { TestWorker } from './TestWorker';
 import { WorkerConfiguration } from '@/config/worker';
 import { WorkerConfig } from '@/types/worker';
 import { ParseWorker } from './ParseWorker'; 
+import { ChunkWorker } from './ChunkWorker';
 
 /**
  * Worker注册表
@@ -19,6 +20,9 @@ export class WorkerRegistry {
           
           case 'document-parser':  // 新增ParseWorker支持
             return new ParseWorker(config);
+
+          case 'document-chunker':
+            return new ChunkWorker(config);
           
           // TODO: 在后续步骤中添加其他Worker
           // case 'document-chunker':
