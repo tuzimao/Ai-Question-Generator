@@ -75,13 +75,33 @@ public static getChunkWorkerConfig(): WorkerConfig {
   
 
   /**
+ * 获取向量化Worker配置
+ */
+public static getEmbeddingWorkerConfig(): WorkerConfig {
+  return {
+    name: 'document-embedder',
+    queueName: 'embedding-processing',
+    concurrency: parseInt(process.env.EMBEDDING_WORKER_CONCURRENCY || '2', 10),
+    pollInterval: parseInt(process.env.EMBEDDING_WORKER_POLL_INTERVAL || '3000', 10),
+    maxRetries: parseInt(process.env.EMBEDDING_WORKER_MAX_RETRIES || '3', 10),
+    timeout: parseInt(process.env.EMBEDDING_WORKER_TIMEOUT || '600000', 10), // 10分钟
+    enabled: process.env.EMBEDDING_WORKER_ENABLED !== 'false'
+  };
+}
+
+
+
+  
+
+  /**
    * 获取所有Worker配置
    */
   public static getAllConfigs(): WorkerConfig[] {
     return [
       this.getParseWorkerConfig(),
       this.getChunkWorkerConfig(),
-      this.getCleanupWorkerConfig()
+      this.getCleanupWorkerConfig(),
+      this.getEmbeddingWorkerConfig()
     ];
   }
 

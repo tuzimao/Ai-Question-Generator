@@ -6,6 +6,7 @@ import { WorkerConfiguration } from '@/config/worker';
 import { WorkerConfig } from '@/types/worker';
 import { ParseWorker } from './ParseWorker'; 
 import { ChunkWorker } from './ChunkWorker';
+import { EmbeddingWorker } from './EmbeddingWorker';
 
 /**
  * Worker注册表
@@ -23,13 +24,15 @@ export class WorkerRegistry {
 
           case 'document-chunker':
             return new ChunkWorker(config);
-          
-          // TODO: 在后续步骤中添加其他Worker
-          // case 'document-chunker':
-          //   return new ChunkWorker(config);
-          
-          default:
-            throw new Error(`未知的Worker类型: ${config.name}`);
+
+           case 'document-chunker':
+             return new ChunkWorker(config);
+
+           case 'document-embedder':
+             return new EmbeddingWorker(config);
+
+           default:
+             throw new Error(`未知的Worker类型: ${config.name}`);
         }
       }
     

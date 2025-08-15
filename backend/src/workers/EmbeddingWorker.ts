@@ -265,7 +265,7 @@ export class EmbeddingWorker extends BaseWorker {
     return {
       success: false,
       error: getErrorMessage(error),
-      errorStack: error instanceof Error ? error.stack : undefined,
+      errorStack: error instanceof Error && error.stack ? error.stack : '',
       duration,
       data: {
         docId: job.doc_id,

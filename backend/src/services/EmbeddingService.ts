@@ -7,7 +7,7 @@ import DocumentChunkModel, {
   DocumentChunk,
   EmbeddingStatus
 } from '@/models/DocumentChunk';
-import { TextNormalizer } from '@/services/TextNormalizer';
+//import { TextNormalizer } from '@/services/TextNormalizer';
 import { 
   EmbeddingRequest,
   EmbeddingResult,
@@ -38,8 +38,8 @@ import { getErrorMessage } from '@/utils/typescript-helpers';
  */
 export class EmbeddingService {
   private static readonly VERSION = '1.0.0';
-  private static providers: Map<EmbeddingProviderType, IEmbeddingProvider> = new Map();
-  private static vectorStores: Map<VectorStoreType, IVectorStore> = new Map();
+  private static providers: Map<string, IEmbeddingProvider> = new Map();
+  private static vectorStores: Map<string, IVectorStore> = new Map();
 
   /**
    * 处理文档向量化
@@ -91,7 +91,10 @@ export class EmbeddingService {
 
       const batchSize = config.batchSize;
       for (let i = 0; i < pendingChunks.length; i += batchSize) {
-        const batch = pendingChunks.slice(i, i + batchSize);
+        const batch = pendingChunks
+            .slice(i, i + batchSize)
+            // 过滤空文本
+            .filter(c => (c.content_cleaned || c.content || '').trim().length > 0);
         
         // 更新进度
         const progress = 25 + (i / pendingChunks.length) * 60;
@@ -109,94 +112,107 @@ export class EmbeddingService {
           }
         );
 
-        try {
-          // 标记chunks为处理中
-          await this.markChunksProcessing(batch.map(c => c.chunk_id));
+    try {
+        // 标记 processing（仅针对此 batch 的 ids）
+        const batchIds = batch.map(c => c.chunk_id);
+        await this.markChunksProcessing(batchIds);
 
-          // 准备批量输入
-          const batchInputs: BatchEmbeddingInput[] = batch.map(chunk => ({
+        // 准备输入
+        const batchInputs: BatchEmbeddingInput[] = batch.map(chunk => ({
             id: chunk.chunk_id,
             text: chunk.content_cleaned || chunk.content,
             metadata: {
-              doc_id: chunk.doc_id,
-              section_id: chunk.section_id,
-              chunk_index: chunk.chunk_index
+            doc_id: chunk.doc_id,
+            section_id: chunk.section_id,
+            chunk_index: chunk.chunk_index
             }
-          }));
+        }));
 
-          // 生成向量
-          const embeddings = await provider.generateBatchEmbeddings(batchInputs);
+        // 生成向量
+        const embeddings = await provider.generateBatchEmbeddings(batchInputs);
 
-          // 准备向量点
-          const vectorPoints: VectorPoint[] = [];
-          for (const embedding of embeddings) {
-            const chunk = batch.find(c => c.chunk_id === embedding.id);
-            if (!chunk) continue;
+        // 将结果按 id 建索引
+        const byId = new Map(embeddings.map(e => [e.id, e]));
 
-            vectorPoints.push({
-              id: chunk.chunk_id,
-              vector: embedding.vector,
-              payload: {
+        // 拆分成功/缺失
+        const succeeded: VectorPoint[] = [];
+        const missing: string[] = [];
+
+        for (const chunk of batch) {
+            const e = byId.get(chunk.chunk_id);
+            if (!e?.vector?.length) {
+            missing.push(chunk.chunk_id);
+            continue;
+            }
+            // tokens 兜底
+            const tok = typeof chunk.token_count === 'number' && chunk.token_count > 0
+            ? chunk.token_count
+            : Math.max(1, (chunk.content_cleaned || chunk.content).length / 4 | 0);
+
+            succeeded.push({
+            id: chunk.chunk_id,
+            vector: e.vector,
+            payload: {
                 doc_id: chunk.doc_id,
                 chunk_id: chunk.chunk_id,
                 user_id: userId,
-                content: chunk.content,
+                content: chunk.content, // 或者 content_cleaned，看你的需求
                 chunk_index: chunk.chunk_index,
-                section_id: chunk.section_id,
-                page_numbers: chunk.primary_page ? [chunk.primary_page] : undefined,
-                token_count: chunk.token_count,
+                ...(chunk.section_id ? { section_id: chunk.section_id } : {}),
+                ...(chunk.primary_page ? { page_numbers: [chunk.primary_page] } : {}),
+                token_count: tok,
                 created_at: new Date().toISOString(),
                 metadata: {
-                  doc_title: document.filename,
-                  doc_type: document.mime_type,
-                  language: document.language,
-                  chunk_type: chunk.chunk_type,
-                  content_quality: chunk.content_quality
+                doc_title: document.filename,
+                doc_type: document.mime_type,
+                language: document.language,
+                chunk_type: chunk.chunk_type,
+                content_quality: chunk.content_quality
                 }
-              }
+            }
             });
 
-            // 统计
-            totalTokens += chunk.token_count;
-          }
+            totalTokens += tok;
+        }
 
-          // 存储向量
-          if (vectorPoints.length > 0) {
-            await store.upsert(vectorPoints);
-          }
+        // 存储向量（仅成功项）
+        if (succeeded.length > 0) {
+            await store.upsert(succeeded);
+        }
 
-          // 更新chunks状态
-          await this.updateChunksEmbedded(
-            vectorPoints.map(vp => vp.id),
+        // 更新 DB 状态
+        if (succeeded.length > 0) {
+            await this.updateChunksEmbedded(
+            succeeded.map(v => v.id),
             config.model,
             vectorStore
-          );
+            );
+        }
+        if (missing.length > 0) {
+            await this.markChunksFailed(missing, 'provider 未返回 embedding');
+            failedChunks += missing.length;
+        }
 
-          processedChunks += vectorPoints.length;
-          
-          // 估算成本
-          const batchCost = provider.estimateCost(
-            batch.reduce((sum, c) => sum + c.token_count, 0)
-          );
-          totalCost += batchCost;
+        processedChunks += succeeded.length;
+
+        // 成本估算
+        const batchTokenSum = batch.reduce((sum, c) => {
+            const tok = typeof c.token_count === 'number' && c.token_count > 0
+            ? c.token_count
+            : Math.max(1, (c.content_cleaned || c.content).length / 4 | 0);
+            return sum + tok;
+        }, 0);
+        totalCost += provider.estimateCost(batchTokenSum);
 
         } catch (error) {
-          console.error(`批次处理失败:`, error);
-          
-          // 标记批次中的chunks为失败
-          await this.markChunksFailed(
-            batch.map(c => c.chunk_id),
-            getErrorMessage(error)
-          );
-          
-          failedChunks += batch.length;
-          
-          // 如果失败太多，停止处理
-          if (failedChunks > pendingChunks.length * 0.1) {
+        console.error(`批次处理失败:`, error);
+        await this.markChunksFailed(batch.map(c => c.chunk_id), getErrorMessage(error));
+        failedChunks += batch.length;
+        if (failedChunks > pendingChunks.length * 0.1) {
             throw new Error(`失败率过高: ${failedChunks}/${pendingChunks.length}`);
-          }
         }
-      }
+        }
+
 
       // 7. 更新文档状态
       await this.updateProgress(onProgress, 90, 100, '更新文档状态...');
@@ -230,14 +246,14 @@ export class EmbeddingService {
 
       return result;
 
-    } catch (error) {
+    } 
+}catch (error) {
       console.error(`❌ 文档向量化失败: ${docId}`, error);
       
       // 更新文档状态为失败
       await DocumentModel.updateStatus(
         docId,
         DocumentIngestStatus.FAILED,
-        undefined,
         `向量化失败: ${getErrorMessage(error)}`
       );
       
@@ -245,13 +261,16 @@ export class EmbeddingService {
     }
   }
 
-  /**
-   * 检查幂等性
-   */
+
+// 替换原来的 checkIdempotency
   private static async checkIdempotency(docId: string): Promise<boolean> {
     const stats = await DocumentChunkModel.getDocumentChunkStats(docId);
-    return stats.byStatus[EmbeddingStatus.COMPLETED] > 0;
-  }
+    const pending = (stats.byStatus?.[EmbeddingStatus.PENDING] ?? 0)
+                    + (stats.byStatus?.[EmbeddingStatus.PROCESSING] ?? 0)
+                    + (stats.byStatus?.[EmbeddingStatus.FAILED] ?? 0); // 允许重试失败
+    // 仅当没有 pending/processing/failed 时才认为“已经完成可以跳过”
+    return pending === 0 && (stats.byStatus?.[EmbeddingStatus.COMPLETED] ?? 0) > 0;
+    }
 
   /**
    * 验证文档
@@ -285,62 +304,60 @@ export class EmbeddingService {
   /**
    * 获取或创建Provider
    */
-  private static async getOrCreateProvider(config: any): Promise<IEmbeddingProvider> {
-    let provider = this.providers.get(config.provider);
-    
-    if (!provider) {
-      switch (config.provider) {
-        case EmbeddingProviderType.OPENAI:
-          provider = new OpenAIEmbeddingProvider(config.dimension);
-          break;
-        case EmbeddingProviderType.LOCAL:
-          provider = new LocalEmbeddingProvider(config.dimension);
-          break;
-        default:
-          throw new Error(`不支持的Provider: ${config.provider}`);
-      }
-      
-      await provider.initialize(config);
-      this.providers.set(config.provider, provider);
+private static async getOrCreateProvider(config: any): Promise<IEmbeddingProvider> {
+  const key = `${config.provider}:${config.model}:${config.dimension}`;
+  let provider = this.providers.get(key);
+
+  if (!provider) {
+    switch (config.provider) {
+      case EmbeddingProviderType.OPENAI:
+        provider = new OpenAIEmbeddingProvider(config.dimension);
+        break;
+      case EmbeddingProviderType.LOCAL:
+        provider = new LocalEmbeddingProvider(config.dimension);
+        break;
+      default:
+        throw new Error(`不支持的Provider: ${config.provider}`);
     }
-    
-    return provider;
+    await provider.initialize(config);
+    this.providers.set(key, provider);
   }
+  return provider;
+}
 
   /**
    * 获取或创建VectorStore
    */
-  private static async getOrCreateVectorStore(
-    storeType: VectorStoreType,
-    dimension: number
-  ): Promise<IVectorStore> {
-    let store = this.vectorStores.get(storeType);
-    
-    if (!store) {
-      switch (storeType) {
-        case VectorStoreType.MEMORY:
-          store = new MemoryVectorStore();
-          break;
-        case VectorStoreType.QDRANT:
-          store = new QdrantVectorStore();
-          break;
-        default:
-          throw new Error(`不支持的VectorStore: ${storeType}`);
-      }
-      
-      const collectionName = process.env.QDRANT_COLLECTION_NAME || 'documents';
-      await store.initialize(collectionName, dimension);
-      this.vectorStores.set(storeType, store);
-    }
-    
-    return store;
-  }
+private static async getOrCreateVectorStore(
+  storeType: VectorStoreType,
+  dimension: number
+): Promise<IVectorStore> {
+  const collectionName = process.env.QDRANT_COLLECTION || 'documents';
+  const key = `${storeType}:${collectionName}:${dimension}`;
 
-  /**
-   * 标记chunks为处理中
-   */
-  private static async markChunksProcessing(chunkIds: string[]): Promise<void> {
-    await Database.withTransaction(async (trx: Knex.Transaction) => {
+  let store = this.vectorStores.get(key);
+  if (!store) {
+    switch (storeType) {
+      case VectorStoreType.MEMORY:
+        store = new MemoryVectorStore();
+        break;
+      case VectorStoreType.QDRANT:
+        store = new QdrantVectorStore();
+        break;
+      default:
+        throw new Error(`不支持的VectorStore: ${storeType}`);
+    }
+    await store.initialize(collectionName, dimension);
+    this.vectorStores.set(key, store);
+  }
+  return store;
+}
+
+/**
+ * 标记chunks为处理中
+ */
+private static async markChunksProcessing(chunkIds: string[]): Promise<void> {
+  await Database.withTransaction(async (trx: Knex.Transaction) => {
       for (const chunkId of chunkIds) {
         await DocumentChunkModel.updateEmbeddingStatus(
           chunkId,
@@ -353,26 +370,51 @@ export class EmbeddingService {
     });
   }
 
+  // 新增：批量更新工具（若你的 Model 已有类似方法可直接用）
+    private static async bulkUpdateEmbeddingStatus(
+    chunkIds: string[],
+    status: EmbeddingStatus,
+    extra: Partial<{
+        vector_id: string | null;
+        embedding_model: string | null;
+        processing_notes: string | null;
+    }> = {}
+    ): Promise<void> {
+    if (chunkIds.length === 0) return;
+    await Database.getInstance()('document_chunks')
+        .whereIn('chunk_id', chunkIds)
+        .update({
+        embedding_status: status,
+        vector_id: extra.vector_id ?? null,
+        embedding_model: extra.embedding_model ?? null,
+        processing_notes: extra.processing_notes ?? null,
+        updated_at: new Date(),
+        });
+    }
+
   /**
    * 更新chunks为已嵌入
    */
-  private static async updateChunksEmbedded(
-    chunkIds: string[],
-    model: string,
-    vectorStore: VectorStoreType
-  ): Promise<void> {
-    await Database.withTransaction(async (trx: Knex.Transaction) => {
-      for (const chunkId of chunkIds) {
-        await DocumentChunkModel.updateEmbeddingStatus(
-          chunkId,
-          EmbeddingStatus.COMPLETED,
-          `${vectorStore}:${chunkId}`,
-          model,
-          trx
-        );
-      }
-    });
-  }
+    private static async updateChunksEmbedded(
+        chunkIds: string[],
+        model: string,
+        _vectorStore: VectorStoreType
+        ): Promise<void> {
+        await Database.withTransaction(async (trx: Knex.Transaction) => {
+            for (const chunkId of chunkIds) {
+            // 关键修改：vector_id 只存 chunkId，避免超长
+            const vectorId = chunkId;
+
+            await DocumentChunkModel.updateEmbeddingStatus(
+                chunkId,
+                EmbeddingStatus.COMPLETED,
+                vectorId,
+                model,
+                trx
+            );
+            }
+        });
+        }
 
   /**
    * 标记chunks为失败
