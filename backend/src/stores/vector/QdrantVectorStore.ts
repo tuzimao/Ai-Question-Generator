@@ -21,22 +21,64 @@ export class QdrantVectorStore implements IVectorStore {
   /**
    * 初始化
    */
-  public async initialize(collectionName: string, dimension: number): Promise<void> {
-    this.collectionName = collectionName;
-    this.dimension = dimension;
-    
-    // 初始化向量服务
-    await this.vectorService.initialize();
-    
-    // 确保集合存在
-    await this.vectorService.ensureCollection({
-      name: collectionName,
-      vectorSize: dimension,
-      distance: 'Cosine'
-    });
-    
-    console.log(`✅ Qdrant VectorStore初始化成功 (集合: ${collectionName}, 维度: ${dimension})`);
-  }
+    public async initialize(collectionName: string, dimension: number): Promise<void> {
+        this.collectionName = collectionName;
+        this.dimension = dimension;
+
+        // 1) 初始化底层客户端
+        await this.vectorService.initialize();
+
+        // 2) 读取集合信息（不存在则 info 为 undefined/null）
+        let info: any | undefined;
+        try {
+            info = await this.vectorService.getCollectionInfo(collectionName);
+        } catch {
+            info = undefined;
+        }
+
+        // 从返回信息中提取已存在集合的维度（兼容单向量/命名向量两种 schema）
+        const extractExistingDim = (i: any): number | undefined => {
+            if (!i) return undefined;
+            // Qdrant openapi: result.config.params.vectors.size（REST 客户端通常能拿到）
+            const size1 = i?.config?.params?.vectors?.size;
+            // 有的封装会直接返回 vectors.size
+            const size2 = i?.vectors?.size;
+            return typeof size1 === 'number' ? size1 : (typeof size2 === 'number' ? size2 : undefined);
+        };
+
+        const existingDim = extractExistingDim(info);
+        const allowRecreate = process.env.NODE_ENV === 'test' || process.env.QDRANT_ALLOW_RECREATE === 'true';
+
+        if (!info) {
+            // 3a) 集合不存在：直接创建
+            await this.vectorService.createCollection({
+            name: collectionName,
+            vectorSize: dimension,
+            distance: 'Cosine',
+            });
+            console.log(`✅ 成功创建集合: ${collectionName} (维度: ${dimension})`);
+        } else if (existingDim !== undefined && existingDim !== dimension) {
+            // 3b) 集合存在但维度与期望不一致
+            const msg = `Qdrant集合(${collectionName})维度不匹配：现有=${existingDim}, 期望=${dimension}`;
+            if (allowRecreate) {
+            console.warn(`⚠️ ${msg}，将删除并重建（测试/允许模式）`);
+            await this.vectorService.deleteCollection(collectionName);
+            await this.vectorService.createCollection({
+                name: collectionName,
+                vectorSize: dimension,
+                distance: 'Cosine',
+            });
+            console.log(`✅ 重新创建集合: ${collectionName} (维度: ${dimension})`);
+            } else {
+            throw new Error(msg + '。如需自动重建，请设置 QDRANT_ALLOW_RECREATE=true 或在测试环境执行。');
+            }
+        } else {
+            // 3c) 集合存在且维度一致
+            console.log(`✅ Qdrant集合已存在: ${collectionName} (维度: ${existingDim ?? dimension})`);
+        }
+
+        console.log(`✅ Qdrant VectorStore初始化成功 (集合: ${collectionName}, 维度: ${dimension})`);
+        }
 
   /**
    * 插入向量点
@@ -147,4 +189,14 @@ export class QdrantVectorStore implements IVectorStore {
     }
     return true;
   }
+
+
+
+  /**
+ * 获取集合信息：
+ * - 如果集合不存在，返回 undefined
+ * - 如果存在，返回 Qdrant 原始 result（包含 config/points_count/indexed_vectors_count 等）
+ */
+
+
 }

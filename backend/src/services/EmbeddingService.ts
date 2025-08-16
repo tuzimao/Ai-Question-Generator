@@ -328,36 +328,45 @@ private static async getOrCreateProvider(config: any): Promise<IEmbeddingProvide
   /**
    * 获取或创建VectorStore
    */
-private static async getOrCreateVectorStore(
-  storeType: VectorStoreType,
-  dimension: number
-): Promise<IVectorStore> {
-  const collectionName = process.env.QDRANT_COLLECTION || 'documents';
-  const key = `${storeType}:${collectionName}:${dimension}`;
 
-  let store = this.vectorStores.get(key);
-  if (!store) {
-    switch (storeType) {
-      case VectorStoreType.MEMORY:
-        store = new MemoryVectorStore();
-        break;
-      case VectorStoreType.QDRANT:
-        store = new QdrantVectorStore();
-        break;
-      default:
-        throw new Error(`不支持的VectorStore: ${storeType}`);
+  private static async getOrCreateVectorStore(
+    storeType: VectorStoreType,
+    dimension: number
+  ): Promise<IVectorStore> {
+    const base = process.env.QDRANT_COLLECTION_NAME || 'documents';
+
+    // ⚠️ 关键：Qdrant 用维度后缀，避免维度冲突
+    const collectionName =
+      storeType === VectorStoreType.QDRANT
+        ? `${base}_d${dimension}`
+        : base;
+
+    // 缓存 key 用实际集合名即可（避免用未经后缀的 base）
+    const key = `${storeType}:${collectionName}`;
+
+    let store = this.vectorStores.get(key);
+    if (!store) {
+      switch (storeType) {
+        case VectorStoreType.MEMORY:
+          store = new MemoryVectorStore();
+          break;
+        case VectorStoreType.QDRANT:
+          store = new QdrantVectorStore();
+          break;
+        default:
+          throw new Error(`不支持的VectorStore: ${storeType}`);
+      }
+      await store.initialize(collectionName, dimension);
+      this.vectorStores.set(key, store);
     }
-    await store.initialize(collectionName, dimension);
-    this.vectorStores.set(key, store);
+    return store;
   }
-  return store;
-}
 
-/**
- * 标记chunks为处理中
- */
-private static async markChunksProcessing(chunkIds: string[]): Promise<void> {
-  await Database.withTransaction(async (trx: Knex.Transaction) => {
+  /**
+   * 标记chunks为处理中
+   */
+  private static async markChunksProcessing(chunkIds: string[]): Promise<void> {
+    await Database.withTransaction(async (trx: Knex.Transaction) => {
       for (const chunkId of chunkIds) {
         await DocumentChunkModel.updateEmbeddingStatus(
           chunkId,
